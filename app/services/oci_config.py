@@ -32,9 +32,13 @@ def validate_uploaded_oci_files(oci_dir: Path) -> tuple[bool, str]:
     return True, "OCI files ready"
 
 
-def save_uploaded_oci_config(raw_config: str, target_dir: Path) -> Path:
+def save_uploaded_oci_config(
+    raw_config: str,
+    target_dir: Path,
+    container_key_path: str = "/app/data/oci/oci_api_key.pem",
+) -> Path:
     target_dir.mkdir(parents=True, exist_ok=True)
-    rendered = build_docker_oci_config(raw_config, "/app/data/oci/oci_api_key.pem")
+    rendered = build_docker_oci_config(raw_config, container_key_path)
     config_path = target_dir / "config"
     config_path.write_text(rendered, encoding="utf-8")
     config_path.chmod(0o600)

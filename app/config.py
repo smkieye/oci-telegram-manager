@@ -33,6 +33,7 @@ class Settings:
     database_path: Path
     oci_config_path: Path
     oci_key_path: Path
+    accounts_dir: Path
     cloudflare_api_token: str | None = None
     cloudflare_zone_id: str | None = None
     default_cloudflare_record: str | None = None
@@ -56,6 +57,7 @@ class Settings:
             database_path=data_dir / "oci_manager.sqlite3",
             oci_config_path=oci_dir / "config",
             oci_key_path=oci_dir / "oci_api_key.pem",
+            accounts_dir=data_dir / "accounts",
             cloudflare_api_token=os.getenv("CLOUDFLARE_API_TOKEN") or None,
             cloudflare_zone_id=os.getenv("CLOUDFLARE_ZONE_ID") or None,
             default_cloudflare_record=os.getenv("DEFAULT_CLOUDFLARE_RECORD") or None,

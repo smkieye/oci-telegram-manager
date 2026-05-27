@@ -17,6 +17,7 @@ def test_settings_loads_required_values_from_environment(monkeypatch, tmp_path):
     assert settings.bot_token == "123456:telegram-token"
     assert settings.allowed_user_ids == {6327047192}
     assert settings.oci_config_path == tmp_path / "oci" / "config"
+    assert settings.accounts_dir == tmp_path / "accounts"
 
 
 def test_mask_secret_keeps_short_safe_hint_without_leaking_full_value():
