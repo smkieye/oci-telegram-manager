@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 from pathlib import Path
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.config import Settings
-from app.keyboards.menu import account_actions, accounts_menu, instance_actions, main_menu
+from app.keyboards.menu import account_actions, accounts_menu, instance_actions, main_menu, sniper_menu
 from app.services.account_store import Account, AccountStore
 from app.services.cloudflare_service import CloudflareService
 from app.services.oci_config import save_uploaded_oci_config, save_uploaded_oci_key, validate_uploaded_oci_files
@@ -20,6 +22,7 @@ WELCOME = """🤖 OCI Telegram Manager 已启动
 - 多 OCI API 账号管理
 - 查看当前账号可访问的 OCI 实例
 - 启动 / 停止 / 重启实例
+- 抢机：按模板抢一次或连续重试创建实例
 - Telegram 内新增账号：配置名称 + OCI config 内容 + .pem 私钥
 - 可选同步 Cloudflare A 记录
 
@@ -28,8 +31,118 @@ WELCOME = """🤖 OCI Telegram Manager 已启动
 2. 按提示输入配置名称、粘贴 config、上传 .pem 私钥
 3. 发送 /accounts 切换账号
 4. 发送 /instances 查看实例
+5. 发送 /sniper 配置抢机模板
 """
 
+
+SNIPER_HELP = """⚡ 抢机功能说明
+
+当前实现的是 OCI API 抢机：按模板调用 launch_instance；如果容量不足，可以用“连续抢机”自动重试。
+
+使用步骤：
+1. 先确认当前 OCI 账号正确
+2. 点击“粘贴/更新抢机模板”
+3. 粘贴 JSON 模板
+4. 先点“抢一次”验证参数，再按需点“连续抢机”
+
+模板示例：
+```json
+{
+  "compartment_id": "ocid1.compartment.oc1..xxx",
+  "availability_domain": "xxxx:AP-SINGAPORE-1-AD-1",
+  "subnet_id": "ocid1.subnet.oc1.ap-singapore-1.xxx",
+  "image_id": "ocid1.image.oc1.ap-singapore-1.xxx",
+  "shape": "VM.Standard.A1.Flex",
+  "shape_config": {"ocpus": 1, "memory_in_gbs": 6},
+  "display_name": "free-arm",
+  "assign_public_ip": true,
+  "boot_volume_size_in_gbs": 50,
+  "ssh_authorized_keys": "ssh-rsa AAAA..."
+}
+```
+
+注意：availability_domain、subnet_id、image_id 必须和账号区域匹配。"""
+
+
+def _sniper_template_path(account: Account) -> Path:
+    return account.path / "sniper_template.json"
+
+
+def _load_sniper_template(account: Account) -> dict | None:
+    path = _sniper_template_path(account)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _save_sniper_template(account: Account, template: dict) -> None:
+    path = _sniper_template_path(account)
+    path.write_text(json.dumps(template, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.chmod(0o600)
+
+
+def _mask_template(template: dict) -> str:
+    sanitized = dict(template)
+    if "ssh_authorized_keys" in sanitized:
+        key = str(sanitized["ssh_authorized_keys"])
+        sanitized["ssh_authorized_keys"] = key[:24] + "..." if len(key) > 24 else "***"
+    return json.dumps(sanitized, ensure_ascii=False, indent=2)
+
+
+def _extract_json(text: str) -> dict:
+    raw = text.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        raw = raw.removeprefix("json").strip()
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("模板必须是 JSON 对象")
+    required = ["compartment_id", "availability_domain", "subnet_id", "image_id", "shape"]
+    missing = [key for key in required if not data.get(key)]
+    if missing:
+        raise ValueError("缺少字段: " + ", ".join(missing))
+    return data
+
+
+async def sniper_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text("⚡ 抢机菜单", reply_markup=sniper_menu())
+
+
+async def _sniper_loop(chat_id: int, account_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
+    store = _account_store(context)
+    stop_key = f"sniper_stop:{chat_id}:{account_id}"
+    context.application.bot_data[stop_key] = False
+    try:
+        account = store.get_account(account_id)
+        template = _load_sniper_template(account)
+        if not template:
+            await context.bot.send_message(chat_id, "⚠️ 没有抢机模板，请先粘贴/更新模板。")
+            return
+        service = OCIService(account.config_path)
+        for attempt in range(1, 61):
+            if context.application.bot_data.get(stop_key):
+                await context.bot.send_message(chat_id, f"⏹ 已停止连续抢机。已尝试 {attempt - 1} 次。")
+                return
+            try:
+                instance = await asyncio.to_thread(service.launch_instance, template)
+                await context.bot.send_message(
+                    chat_id,
+                    "✅ 抢机提交成功！\n"
+                    f"名称：{instance.display_name}\n"
+                    f"状态：{instance.lifecycle_state}\n"
+                    f"ID：`{instance.id}`",
+                    parse_mode="Markdown",
+                )
+                return
+            except Exception as exc:
+                msg = str(exc)
+                if attempt == 1 or attempt % 5 == 0:
+                    await context.bot.send_message(chat_id, f"🔁 第 {attempt}/60 次未成功：{msg[:300]}")
+                await asyncio.sleep(30)
+        await context.bot.send_message(chat_id, "⚠️ 连续抢机结束：60 次仍未成功。")
+    finally:
+        context.application.bot_data.pop(stop_key, None)
+        context.application.bot_data.pop(f"sniper_task:{chat_id}:{account_id}", None)
 
 ADD_ACCOUNT_HELP = """请按步骤新增 OCI 账号：
 
@@ -91,6 +204,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/add_account - 新增 OCI 账号\n"
         "/cancel - 取消当前录入\n"
         "/instances - 查看当前账号实例\n"
+        "/sniper - 抢机菜单 / 配置抢机模板\n"
         "/check - 检查当前账号 OCI 文件\n"
         "/use_account <账号ID> - 切换当前账号\n"
         "/delete_account <账号ID> - 删除账号\n"
@@ -173,6 +287,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     text = (update.effective_message.text or "").strip()
+
+    if flow.get("step") == "sniper_template":
+        account = _current_account_or_none(context)
+        if account is None:
+            context.user_data.pop("add_account", None)
+            await update.effective_message.reply_text("⚠️ 当前没有 OCI 账号。发送 /accounts 选择账号。")
+            return
+        try:
+            template = _extract_json(text)
+            _save_sniper_template(account, template)
+        except Exception as exc:
+            await update.effective_message.reply_text(f"❌ 模板保存失败：{exc}\n请重新粘贴 JSON，或发送 /cancel 取消。")
+            return
+        context.user_data.pop("add_account", None)
+        await update.effective_message.reply_text("✅ 抢机模板已保存。建议先点击“抢一次”验证参数。", reply_markup=sniper_menu())
+        return
+
     if flow.get("step") == "name":
         if not text:
             await update.effective_message.reply_text("配置名称不能为空，请重新输入：")
@@ -331,6 +462,79 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         else:
             ok, message = validate_uploaded_oci_files(account.path)
             await query.message.reply_text(("✅ " if ok else "⚠️ ") + f"{account.name}：{message}")
+    elif data == "sniper:menu":
+        await query.message.reply_text("⚡ 抢机菜单", reply_markup=sniper_menu())
+    elif data == "sniper:help":
+        account = store.get_current()
+        extra = ""
+        if account is not None:
+            try:
+                ads = OCIService(account.config_path).list_availability_domains()
+                extra = "\n\n当前账号可用区：\n" + "\n".join(f"- {ad}" for ad in ads)
+            except Exception as exc:
+                extra = f"\n\n读取可用区失败：{exc}"
+        await query.message.reply_text(SNIPER_HELP + extra, parse_mode="Markdown", reply_markup=sniper_menu())
+    elif data == "sniper:set_template":
+        if store.get_current() is None:
+            await query.message.reply_text("⚠️ 当前没有 OCI 账号。发送 /accounts 选择账号。")
+        else:
+            context.user_data["add_account"] = {"step": "sniper_template"}
+            await query.message.reply_text("请粘贴抢机 JSON 模板。发送 /cancel 可取消。")
+    elif data == "sniper:show_template":
+        account = store.get_current()
+        if account is None:
+            await query.message.reply_text("⚠️ 当前没有 OCI 账号。")
+        else:
+            template = _load_sniper_template(account)
+            if not template:
+                await query.message.reply_text("当前账号还没有抢机模板。", reply_markup=sniper_menu())
+            else:
+                await query.message.reply_text("当前模板：\n```json\n" + _mask_template(template) + "\n```", parse_mode="Markdown", reply_markup=sniper_menu())
+    elif data == "sniper:launch_once":
+        account = store.get_current()
+        if account is None:
+            await query.message.reply_text("⚠️ 当前没有 OCI 账号。")
+            return
+        template = _load_sniper_template(account)
+        if not template:
+            await query.message.reply_text("⚠️ 当前账号还没有抢机模板。", reply_markup=sniper_menu())
+            return
+        await query.message.reply_text(f"正在通过账号 {account.name} 抢一次，请稍候……")
+        try:
+            instance = await asyncio.to_thread(OCIService(account.config_path).launch_instance, template)
+            await query.message.reply_text(
+                "✅ 抢机提交成功！\n"
+                f"名称：{instance.display_name}\n"
+                f"状态：{instance.lifecycle_state}\n"
+                f"ID：`{instance.id}`",
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            await query.message.reply_text(f"❌ 本次抢机未成功：{str(exc)[:800]}", reply_markup=sniper_menu())
+    elif data == "sniper:start_loop":
+        account = store.get_current()
+        if account is None:
+            await query.message.reply_text("⚠️ 当前没有 OCI 账号。")
+            return
+        if not _load_sniper_template(account):
+            await query.message.reply_text("⚠️ 当前账号还没有抢机模板。", reply_markup=sniper_menu())
+            return
+        chat_id = query.message.chat_id
+        task_key = f"sniper_task:{chat_id}:{account.id}"
+        if context.application.bot_data.get(task_key):
+            await query.message.reply_text("连续抢机已经在运行中。")
+            return
+        task = context.application.create_task(_sniper_loop(chat_id, account.id, context))
+        context.application.bot_data[task_key] = task
+        await query.message.reply_text("🔁 已启动连续抢机：最多 60 次，每 30 秒一次。", reply_markup=sniper_menu())
+    elif data == "sniper:stop_loop":
+        account = store.get_current()
+        if account is None:
+            await query.message.reply_text("⚠️ 当前没有 OCI 账号。")
+            return
+        chat_id = query.message.chat_id
+        context.application.bot_data[f"sniper_stop:{chat_id}:{account.id}"] = True
+        await query.message.reply_text("已发送停止信号。", reply_markup=sniper_menu())
     elif data == "cf:help":
         await query.message.reply_text("Cloudflare 同步命令：/sync_dns <域名> <IP>。需在 .env 中配置 CLOUDFLARE_API_TOKEN 和 CLOUDFLARE_ZONE_ID。")
     elif data == "help":

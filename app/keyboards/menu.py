@@ -5,6 +5,7 @@ def main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("📋 实例列表", callback_data="instances:list")],
+            [InlineKeyboardButton("⚡ 抢机", callback_data="sniper:menu")],
             [InlineKeyboardButton("👥 OCI 账号管理", callback_data="accounts:list")],
             [
                 InlineKeyboardButton("📤 新增 OCI 账号", callback_data="accounts:add"),
@@ -48,5 +49,21 @@ def instance_actions(instance_key: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("重启", callback_data=f"instance:SOFTRESET:{instance_key}"),
             ],
             [InlineKeyboardButton("返回", callback_data="instances:list")],
+        ]
+    )
+
+
+def sniper_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📌 抢机配置说明", callback_data="sniper:help")],
+            [InlineKeyboardButton("📝 粘贴/更新抢机模板", callback_data="sniper:set_template")],
+            [InlineKeyboardButton("👁 查看当前模板", callback_data="sniper:show_template")],
+            [
+                InlineKeyboardButton("🚀 抢一次", callback_data="sniper:launch_once"),
+                InlineKeyboardButton("🔁 连续抢机", callback_data="sniper:start_loop"),
+            ],
+            [InlineKeyboardButton("⏹ 停止连续抢机", callback_data="sniper:stop_loop")],
+            [InlineKeyboardButton("返回主菜单", callback_data="help")],
         ]
     )

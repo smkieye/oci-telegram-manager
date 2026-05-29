@@ -85,6 +85,55 @@ class OCIService:
         except Exception:
             return None, None
 
+    def list_availability_domains(self) -> list[str]:
+        _oci, config, _compute, _vcn, identity = self._clients()
+        response = identity.list_availability_domains(config["tenancy"])
+        return [item.name for item in response.data]
+
+    def launch_instance(self, template: dict[str, Any]) -> InstanceSummary:
+        oci, _config, compute, _vcn, _identity = self._clients()
+        required = ["compartment_id", "availability_domain", "subnet_id", "image_id", "shape"]
+        missing = [key for key in required if not template.get(key)]
+        if missing:
+            raise ValueError("抢机模板缺少字段: " + ", ".join(missing))
+
+        metadata = dict(template.get("metadata") or {})
+        if template.get("ssh_authorized_keys"):
+            metadata["ssh_authorized_keys"] = template["ssh_authorized_keys"]
+
+        shape_config = None
+        if template.get("shape_config"):
+            shape_config = oci.core.models.LaunchInstanceShapeConfigDetails(**template["shape_config"])
+
+        details = oci.core.models.LaunchInstanceDetails(
+            compartment_id=template["compartment_id"],
+            availability_domain=template["availability_domain"],
+            display_name=template.get("display_name") or "oci-sniper-instance",
+            shape=template["shape"],
+            shape_config=shape_config,
+            source_details=oci.core.models.InstanceSourceViaImageDetails(
+                source_type="image",
+                image_id=template["image_id"],
+                boot_volume_size_in_gbs=template.get("boot_volume_size_in_gbs"),
+            ),
+            create_vnic_details=oci.core.models.CreateVnicDetails(
+                subnet_id=template["subnet_id"],
+                assign_public_ip=bool(template.get("assign_public_ip", True)),
+                display_name=template.get("vnic_display_name"),
+                hostname_label=template.get("hostname_label"),
+            ),
+            metadata=metadata or None,
+        )
+        response = compute.launch_instance(details)
+        item = response.data
+        return InstanceSummary(
+            id=item.id,
+            display_name=item.display_name,
+            lifecycle_state=item.lifecycle_state,
+            availability_domain=item.availability_domain,
+            shape=item.shape,
+        )
+
     def instance_action(self, instance_id: str, action: str) -> str:
         _oci, _config, compute, _vcn, _identity = self._clients()
         normalized = action.upper()

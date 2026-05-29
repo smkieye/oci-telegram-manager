@@ -17,6 +17,7 @@ from app.handlers.bot import (
     help_command,
     list_accounts_command,
     list_instances,
+    sniper_command,
     start,
     sync_dns,
     use_account,
@@ -33,6 +34,7 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("help", restricted(settings)(help_command)))
     app.add_handler(CommandHandler("check", restricted(settings)(check_oci)))
     app.add_handler(CommandHandler("instances", restricted(settings)(list_instances)))
+    app.add_handler(CommandHandler("sniper", restricted(settings)(sniper_command)))
     app.add_handler(CommandHandler("accounts", restricted(settings)(list_accounts_command)))
     app.add_handler(CommandHandler("add_account", restricted(settings)(add_account)))
     app.add_handler(CommandHandler("use_account", restricted(settings)(use_account)))
