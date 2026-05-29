@@ -56,11 +56,11 @@ def instance_actions(instance_key: str) -> InlineKeyboardMarkup:
 def sniper_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton("➕ 新增/编辑开机任务", callback_data="sniper:quick")],
             [InlineKeyboardButton("📌 抢机配置说明", callback_data="sniper:help")],
-            [InlineKeyboardButton("📝 粘贴/更新抢机模板", callback_data="sniper:set_template")],
-            [InlineKeyboardButton("👁 查看当前模板", callback_data="sniper:show_template")],
+            [InlineKeyboardButton("👁 查看当前配置", callback_data="sniper:show_template")],
             [
-                InlineKeyboardButton("🚀 抢一次", callback_data="sniper:launch_once"),
+                InlineKeyboardButton("🚀 开机", callback_data="sniper:launch_once"),
                 InlineKeyboardButton("🔁 连续抢机", callback_data="sniper:start_loop"),
             ],
             [InlineKeyboardButton("⏹ 停止连续抢机", callback_data="sniper:stop_loop")],

@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from app.config import Settings
@@ -37,35 +37,121 @@ WELCOME = """🤖 OCI Telegram Manager 已启动
 
 SNIPER_HELP = """⚡ 抢机功能说明
 
-当前实现的是 OCI API 抢机：按模板调用 launch_instance；如果容量不足，可以用“连续抢机”自动重试。
+我已经把抢机改成类似网页表单的参数：
+- 开机数量
+- 时间间隔
+- CPU
+- 内存
+- 磁盘空间
+- 系统架构：ARM / AMD
+- 系统类型：Canonical Ubuntu / Oracle Autonomous Linux
+- root 密码：可随机生成，也可手动粘贴
 
-使用步骤：
-1. 先确认当前 OCI 账号正确
-2. 点击“粘贴/更新抢机模板”
-3. 粘贴 JSON 模板
-4. 先点“抢一次”验证参数，再按需点“连续抢机”
+默认会自动选择：
+- 当前账号 root compartment
+- 第一个可用 AD
+- 第一个可用 Subnet
+- 对应架构的最新系统镜像
 
-模板示例：
-```json
-{
-  "compartment_id": "ocid1.compartment.oc1..xxx",
-  "availability_domain": "xxxx:AP-SINGAPORE-1-AD-1",
-  "subnet_id": "ocid1.subnet.oc1.ap-singapore-1.xxx",
-  "image_id": "ocid1.image.oc1.ap-singapore-1.xxx",
-  "shape": "VM.Standard.A1.Flex",
-  "shape_config": {"ocpus": 1, "memory_in_gbs": 6},
-  "display_name": "free-arm",
-  "assign_public_ip": true,
-  "boot_volume_size_in_gbs": 50,
-  "ssh_authorized_keys": "ssh-rsa AAAA..."
-}
-```
-
-注意：availability_domain、subnet_id、image_id 必须和账号区域匹配。"""
-
+如果你有多个 VCN/Subnet，或者想指定 AD/Image/Subnet，可以继续用“粘贴/更新高级 JSON 模板”覆盖这些字段。"""
 
 def _sniper_template_path(account: Account) -> Path:
     return account.path / "sniper_template.json"
+
+
+def _default_sniper_template() -> dict:
+    return {
+        "count": 1,
+        "interval_seconds": 60,
+        "cpu": 1,
+        "memory_gb": 6,
+        "disk_gb": 50,
+        "arch": "arm",
+        "os_type": "ubuntu",
+        "root_password": "random",
+        "display_name": "free-arm",
+        "assign_public_ip": True,
+    }
+
+
+def _get_or_create_sniper_template(account: Account) -> dict:
+    template = _load_sniper_template(account)
+    if template is None:
+        template = _default_sniper_template()
+        _save_sniper_template(account, template)
+    return template
+
+
+def _sniper_config_text(template: dict) -> str:
+    arch = str(template.get("arch", "arm")).upper()
+    os_label = "Oracle Autonomous Linux" if template.get("os_type") == "oracle" else "Canonical Ubuntu"
+    password = str(template.get("root_password") or "random")
+    password_label = "随机生成" if password == "random" else "已设置（隐藏）"
+    return (
+        "⚡ 当前抢机配置：\n"
+        f"开机数量：{template.get('count', 1)} 台\n"
+        f"时间间隔：{template.get('interval_seconds', 60)} 秒\n"
+        f"CPU：{template.get('cpu', 1)} 核\n"
+        f"内存：{template.get('memory_gb', 6)} GB\n"
+        f"磁盘空间：{template.get('disk_gb', 50)} GB\n"
+        f"系统架构：{arch}\n"
+        f"系统类型：{os_label}\n"
+        f"root密码：{password_label}\n"
+    )
+
+
+def _sniper_config_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("数量 -", callback_data="sniper:dec:count"), InlineKeyboardButton("数量 +", callback_data="sniper:inc:count")],
+        [InlineKeyboardButton("间隔 -", callback_data="sniper:dec:interval_seconds"), InlineKeyboardButton("间隔 +", callback_data="sniper:inc:interval_seconds")],
+        [InlineKeyboardButton("CPU -", callback_data="sniper:dec:cpu"), InlineKeyboardButton("CPU +", callback_data="sniper:inc:cpu")],
+        [InlineKeyboardButton("内存 -", callback_data="sniper:dec:memory_gb"), InlineKeyboardButton("内存 +", callback_data="sniper:inc:memory_gb")],
+        [InlineKeyboardButton("磁盘 -", callback_data="sniper:dec:disk_gb"), InlineKeyboardButton("磁盘 +", callback_data="sniper:inc:disk_gb")],
+        [InlineKeyboardButton("ARM", callback_data="sniper:arch:arm"), InlineKeyboardButton("AMD", callback_data="sniper:arch:amd")],
+        [InlineKeyboardButton("Ubuntu", callback_data="sniper:os:ubuntu"), InlineKeyboardButton("Oracle Linux", callback_data="sniper:os:oracle")],
+        [InlineKeyboardButton("随机root密码", callback_data="sniper:password_random"), InlineKeyboardButton("手动root密码", callback_data="sniper:set_password")],
+        [InlineKeyboardButton("🚀 抢一次", callback_data="sniper:launch_once"), InlineKeyboardButton("🔁 连续抢机", callback_data="sniper:start_loop")],
+        [InlineKeyboardButton("高级JSON", callback_data="sniper:set_template"), InlineKeyboardButton("返回", callback_data="sniper:menu")],
+    ])
+
+
+def _adjust_sniper_template(template: dict, action: str, field: str) -> None:
+    steps = {"count": 1, "interval_seconds": 10, "cpu": 1, "memory_gb": 1, "disk_gb": 10}
+    mins = {"count": 1, "interval_seconds": 10, "cpu": 1, "memory_gb": 1, "disk_gb": 50}
+    maxs = {"count": 10, "interval_seconds": 3600, "cpu": 4, "memory_gb": 24, "disk_gb": 200}
+    if field not in steps:
+        return
+    current = int(template.get(field, mins[field]))
+    current += steps[field] if action == "inc" else -steps[field]
+    template[field] = max(mins[field], min(maxs[field], current))
+
+
+async def _reply_sniper_config(message, account: Account) -> None:
+    template = _get_or_create_sniper_template(account)
+    await message.reply_text(_sniper_config_text(template), reply_markup=_sniper_config_keyboard())
+
+
+async def _launch_sniper_batch(context: ContextTypes.DEFAULT_TYPE, chat_id: int, account: Account, template: dict) -> int:
+    count = max(1, int(template.get("count", 1)))
+    interval = max(1, int(template.get("interval_seconds", 60)))
+    service = OCIService(account.config_path)
+    launched = 0
+    for idx in range(count):
+        instance = await asyncio.to_thread(service.launch_instance, template)
+        launched += 1
+        password = template.get("root_password")
+        password_line = "" if not password or password == "random" else f"\nroot密码：{password}"
+        await context.bot.send_message(
+            chat_id,
+            "✅ 开机任务已提交！\n"
+            f"第 {idx + 1}/{count} 台\n"
+            f"名称：{instance.display_name}\n"
+            f"状态：{instance.lifecycle_state}\n"
+            f"ID：{instance.id}" + password_line,
+        )
+        if idx < count - 1:
+            await asyncio.sleep(interval)
+    return launched
 
 
 def _load_sniper_template(account: Account) -> dict | None:
@@ -86,6 +172,8 @@ def _mask_template(template: dict) -> str:
     if "ssh_authorized_keys" in sanitized:
         key = str(sanitized["ssh_authorized_keys"])
         sanitized["ssh_authorized_keys"] = key[:24] + "..." if len(key) > 24 else "***"
+    if sanitized.get("root_password") and sanitized.get("root_password") != "random":
+        sanitized["root_password"] = "***"
     return json.dumps(sanitized, ensure_ascii=False, indent=2)
 
 
@@ -97,15 +185,21 @@ def _extract_json(text: str) -> dict:
     data = json.loads(raw)
     if not isinstance(data, dict):
         raise ValueError("模板必须是 JSON 对象")
-    required = ["compartment_id", "availability_domain", "subnet_id", "image_id", "shape"]
-    missing = [key for key in required if not data.get(key)]
-    if missing:
-        raise ValueError("缺少字段: " + ", ".join(missing))
-    return data
+    template = _default_sniper_template()
+    template.update(data)
+    aliases = {"memory": "memory_gb", "disk": "disk_gb", "boot_volume_size_in_gbs": "disk_gb"}
+    for old, new in aliases.items():
+        if old in template and new not in data:
+            template[new] = template[old]
+    return template
 
 
 async def sniper_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.effective_message.reply_text("⚡ 抢机菜单", reply_markup=sniper_menu())
+    account = _current_account_or_none(context)
+    if account is None:
+        await update.effective_message.reply_text("⚠️ 当前没有 OCI 账号。发送 /accounts 选择账号。")
+        return
+    await _reply_sniper_config(update.effective_message, account)
 
 
 async def _sniper_loop(chat_id: int, account_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -124,15 +218,11 @@ async def _sniper_loop(chat_id: int, account_id: str, context: ContextTypes.DEFA
                 await context.bot.send_message(chat_id, f"⏹ 已停止连续抢机。已尝试 {attempt - 1} 次。")
                 return
             try:
-                instance = await asyncio.to_thread(service.launch_instance, template)
-                await context.bot.send_message(
-                    chat_id,
-                    "✅ 抢机提交成功！\n"
-                    f"名称：{instance.display_name}\n"
-                    f"状态：{instance.lifecycle_state}\n"
-                    f"ID：`{instance.id}`",
-                    parse_mode="Markdown",
-                )
+                if template.get("root_password") == "random":
+                    template["root_password"] = OCIService.generate_root_password()
+                    _save_sniper_template(account, template)
+                launched = await _launch_sniper_batch(context, chat_id, account, template)
+                await context.bot.send_message(chat_id, f"✅ 连续抢机完成，已提交 {launched} 台。")
                 return
             except Exception as exc:
                 msg = str(exc)
@@ -287,6 +377,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     text = (update.effective_message.text or "").strip()
+
+    if flow.get("step") == "sniper_password":
+        account = _current_account_or_none(context)
+        if account is None:
+            context.user_data.pop("add_account", None)
+            await update.effective_message.reply_text("⚠️ 当前没有 OCI 账号。")
+            return
+        if len(text) < 8:
+            await update.effective_message.reply_text("root 密码至少 8 位，请重新输入，或发送 /cancel。")
+            return
+        template = _get_or_create_sniper_template(account)
+        template["root_password"] = text
+        _save_sniper_template(account, template)
+        context.user_data.pop("add_account", None)
+        await update.effective_message.reply_text("✅ root 密码已保存（不会在模板里明文显示）。", reply_markup=_sniper_config_keyboard())
+        return
 
     if flow.get("step") == "sniper_template":
         account = _current_account_or_none(context)
@@ -464,6 +570,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(("✅ " if ok else "⚠️ ") + f"{account.name}：{message}")
     elif data == "sniper:menu":
         await query.message.reply_text("⚡ 抢机菜单", reply_markup=sniper_menu())
+    elif data == "sniper:quick":
+        account = store.get_current()
+        if account is None:
+            await query.message.reply_text("⚠️ 当前没有 OCI 账号。发送 /accounts 选择账号。")
+        else:
+            await _reply_sniper_config(query.message, account)
     elif data == "sniper:help":
         account = store.get_current()
         extra = ""
@@ -473,13 +585,56 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 extra = "\n\n当前账号可用区：\n" + "\n".join(f"- {ad}" for ad in ads)
             except Exception as exc:
                 extra = f"\n\n读取可用区失败：{exc}"
-        await query.message.reply_text(SNIPER_HELP + extra, parse_mode="Markdown", reply_markup=sniper_menu())
+        await query.message.reply_text(SNIPER_HELP + extra, reply_markup=sniper_menu())
+    elif data.startswith("sniper:inc:") or data.startswith("sniper:dec:"):
+        _, action, field = data.split(":", 2)
+        account = store.get_current()
+        if account is None:
+            await query.message.reply_text("⚠️ 当前没有 OCI 账号。")
+        else:
+            template = _get_or_create_sniper_template(account)
+            _adjust_sniper_template(template, action, field)
+            _save_sniper_template(account, template)
+            await query.message.reply_text(_sniper_config_text(template), reply_markup=_sniper_config_keyboard())
+    elif data.startswith("sniper:arch:"):
+        arch = data.rsplit(":", 1)[1]
+        account = store.get_current()
+        if account is not None:
+            template = _get_or_create_sniper_template(account)
+            template["arch"] = arch
+            template["shape"] = "VM.Standard.A1.Flex" if arch == "arm" else "VM.Standard.E2.1.Micro"
+            template["display_name"] = f"free-{arch}"
+            if arch == "arm" and int(template.get("memory_gb", 1)) < 6:
+                template["memory_gb"] = 6
+            _save_sniper_template(account, template)
+            await query.message.reply_text(_sniper_config_text(template), reply_markup=_sniper_config_keyboard())
+    elif data.startswith("sniper:os:"):
+        os_type = data.rsplit(":", 1)[1]
+        account = store.get_current()
+        if account is not None:
+            template = _get_or_create_sniper_template(account)
+            template["os_type"] = os_type
+            _save_sniper_template(account, template)
+            await query.message.reply_text(_sniper_config_text(template), reply_markup=_sniper_config_keyboard())
+    elif data == "sniper:password_random":
+        account = store.get_current()
+        if account is not None:
+            template = _get_or_create_sniper_template(account)
+            template["root_password"] = OCIService.generate_root_password()
+            _save_sniper_template(account, template)
+            await query.message.reply_text("✅ 已随机生成并保存 root 密码。抢机成功后会单独发给你。", reply_markup=_sniper_config_keyboard())
+    elif data == "sniper:set_password":
+        if store.get_current() is None:
+            await query.message.reply_text("⚠️ 当前没有 OCI 账号。")
+        else:
+            context.user_data["add_account"] = {"step": "sniper_password"}
+            await query.message.reply_text("请输入 root 密码（至少 8 位）。发送 /cancel 可取消。")
     elif data == "sniper:set_template":
         if store.get_current() is None:
             await query.message.reply_text("⚠️ 当前没有 OCI 账号。发送 /accounts 选择账号。")
         else:
             context.user_data["add_account"] = {"step": "sniper_template"}
-            await query.message.reply_text("请粘贴抢机 JSON 模板。发送 /cancel 可取消。")
+            await query.message.reply_text("请粘贴高级 JSON 模板。发送 /cancel 可取消。")
     elif data == "sniper:show_template":
         account = store.get_current()
         if account is None:
@@ -487,38 +642,33 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         else:
             template = _load_sniper_template(account)
             if not template:
-                await query.message.reply_text("当前账号还没有抢机模板。", reply_markup=sniper_menu())
+                await query.message.reply_text("当前账号还没有抢机配置。", reply_markup=sniper_menu())
             else:
-                await query.message.reply_text("当前模板：\n```json\n" + _mask_template(template) + "\n```", parse_mode="Markdown", reply_markup=sniper_menu())
+                await query.message.reply_text("当前配置：\n```json\n" + _mask_template(template) + "\n```", parse_mode="Markdown", reply_markup=sniper_menu())
     elif data == "sniper:launch_once":
         account = store.get_current()
         if account is None:
             await query.message.reply_text("⚠️ 当前没有 OCI 账号。")
             return
-        template = _load_sniper_template(account)
-        if not template:
-            await query.message.reply_text("⚠️ 当前账号还没有抢机模板。", reply_markup=sniper_menu())
-            return
-        await query.message.reply_text(f"正在通过账号 {account.name} 抢一次，请稍候……")
+        template = _get_or_create_sniper_template(account)
+        if template.get("root_password") == "random":
+            template["root_password"] = OCIService.generate_root_password()
+            _save_sniper_template(account, template)
+        await query.message.reply_text(f"正在通过账号 {account.name} 提交开机任务，请稍候……")
         try:
-            instance = await asyncio.to_thread(OCIService(account.config_path).launch_instance, template)
-            await query.message.reply_text(
-                "✅ 抢机提交成功！\n"
-                f"名称：{instance.display_name}\n"
-                f"状态：{instance.lifecycle_state}\n"
-                f"ID：`{instance.id}`",
-                parse_mode="Markdown",
-            )
+            launched = await _launch_sniper_batch(context, query.message.chat_id, account, template)
+            await query.message.reply_text(f"✅ 本轮开机任务完成，已提交 {launched} 台。", reply_markup=sniper_menu())
         except Exception as exc:
-            await query.message.reply_text(f"❌ 本次抢机未成功：{str(exc)[:800]}", reply_markup=sniper_menu())
+            await query.message.reply_text(f"❌ 本次抢机未成功：{str(exc)[:800]}", reply_markup=_sniper_config_keyboard())
     elif data == "sniper:start_loop":
         account = store.get_current()
         if account is None:
             await query.message.reply_text("⚠️ 当前没有 OCI 账号。")
             return
-        if not _load_sniper_template(account):
-            await query.message.reply_text("⚠️ 当前账号还没有抢机模板。", reply_markup=sniper_menu())
-            return
+        template = _get_or_create_sniper_template(account)
+        if template.get("root_password") == "random":
+            template["root_password"] = OCIService.generate_root_password()
+            _save_sniper_template(account, template)
         chat_id = query.message.chat_id
         task_key = f"sniper_task:{chat_id}:{account.id}"
         if context.application.bot_data.get(task_key):
@@ -526,7 +676,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         task = context.application.create_task(_sniper_loop(chat_id, account.id, context))
         context.application.bot_data[task_key] = task
-        await query.message.reply_text("🔁 已启动连续抢机：最多 60 次，每 30 秒一次。", reply_markup=sniper_menu())
+        await query.message.reply_text("🔁 已启动连续抢机：最多 60 轮，每轮按配置数量开机。", reply_markup=sniper_menu())
     elif data == "sniper:stop_loop":
         account = store.get_current()
         if account is None:
