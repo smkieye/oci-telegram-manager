@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -131,23 +132,57 @@ async def _reply_sniper_config(message, account: Account) -> None:
     await message.reply_text(_sniper_config_text(template), reply_markup=_sniper_config_keyboard())
 
 
-async def _launch_sniper_batch(context: ContextTypes.DEFAULT_TYPE, chat_id: int, account: Account, template: dict) -> int:
+def _format_duration(seconds: float) -> str:
+    total = max(0, int(seconds))
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{days}天{hours}小时{minutes}分钟{secs}秒"
+
+
+def _success_message(account: Account, instance, template: dict, attempts: int, started_at: datetime) -> str:
+    now = datetime.now()
+    arch = str(template.get("arch", "arm")).upper()
+    password = str(template.get("root_password") or "")
+    public_ip = instance.public_ip or "获取中/暂未分配"
+    duration = _format_duration((now - started_at).total_seconds())
+    return (
+        "【开机任务】 \n\n"
+        f"🎉 用户：[{account.name}] 开机成功 🎉\n"
+        f"时间： {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"Region： {instance.region or '-'}\n"
+        f"CPU类型： {arch}\n"
+        f"CPU： {template.get('cpu', '-')}\n"
+        f"内存（GB）： {template.get('memory_gb', '-')}\n"
+        f"磁盘大小（GB）： {template.get('disk_gb', '-')}\n"
+        f"Shape： {instance.shape or template.get('shape') or '-'}\n"
+        f"公网IP： {public_ip}\n"
+        f"root密码： {password}\n"
+        f"开机次数：{attempts}\n"
+        f"开机时长：{duration}"
+    )
+
+
+async def _launch_sniper_batch(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    account: Account,
+    template: dict,
+    *,
+    attempts: int = 1,
+    started_at: datetime | None = None,
+) -> int:
     count = max(1, int(template.get("count", 1)))
     interval = max(1, int(template.get("interval_seconds", 60)))
+    started_at = started_at or datetime.now()
     service = OCIService(account.config_path)
     launched = 0
     for idx in range(count):
         instance = await asyncio.to_thread(service.launch_instance, template)
         launched += 1
-        password = template.get("root_password")
-        password_line = "" if not password or password == "random" else f"\nroot密码：{password}"
         await context.bot.send_message(
             chat_id,
-            "✅ 开机任务已提交！\n"
-            f"第 {idx + 1}/{count} 台\n"
-            f"名称：{instance.display_name}\n"
-            f"状态：{instance.lifecycle_state}\n"
-            f"ID：{instance.id}" + password_line,
+            _success_message(account, instance, template, attempts, started_at),
         )
         if idx < count - 1:
             await asyncio.sleep(interval)
@@ -213,6 +248,7 @@ async def _sniper_loop(chat_id: int, account_id: str, context: ContextTypes.DEFA
             await context.bot.send_message(chat_id, "⚠️ 没有抢机模板，请先粘贴/更新模板。")
             return
         attempt = 0
+        started_at = datetime.now()
         interval = max(1, int(template.get("interval_seconds", 60)))
         while True:
             attempt += 1
@@ -223,7 +259,7 @@ async def _sniper_loop(chat_id: int, account_id: str, context: ContextTypes.DEFA
                 if template.get("root_password") == "random":
                     template["root_password"] = OCIService.generate_root_password()
                     _save_sniper_template(account, template)
-                launched = await _launch_sniper_batch(context, chat_id, account, template)
+                launched = await _launch_sniper_batch(context, chat_id, account, template, attempts=attempt, started_at=started_at)
                 await context.bot.send_message(chat_id, f"✅ 连续抢机完成，已提交 {launched} 台。")
                 return
             except Exception as exc:
@@ -655,9 +691,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if template.get("root_password") == "random":
             template["root_password"] = OCIService.generate_root_password()
             _save_sniper_template(account, template)
+        started_at = datetime.now()
         await query.message.reply_text(f"正在通过账号 {account.name} 提交开机任务，请稍候……")
         try:
-            launched = await _launch_sniper_batch(context, query.message.chat_id, account, template)
+            launched = await _launch_sniper_batch(context, query.message.chat_id, account, template, attempts=1, started_at=started_at)
             await query.message.reply_text(f"✅ 本轮开机任务完成，已提交 {launched} 台。", reply_markup=sniper_menu())
         except Exception as exc:
             await query.message.reply_text(f"❌ 本次抢机未成功：{str(exc)[:800]}", reply_markup=_sniper_config_keyboard())

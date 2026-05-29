@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import secrets
 import string
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -184,7 +185,7 @@ runcmd:
         return normalized
 
     def launch_instance(self, template: dict[str, Any]) -> InstanceSummary:
-        oci, _config, compute, vcn, _identity = self._clients()
+        oci, config, compute, vcn, _identity = self._clients()
         template = self.normalize_sniper_template(template)
         template["image_id"] = self._latest_image_id(
             compute,
@@ -229,12 +230,24 @@ runcmd:
         )
         response = compute.launch_instance(details)
         item = response.data
+        public_ip = None
+        private_ip = None
+        # VNIC attachment / public IP can lag behind launch_instance. Poll briefly so
+        # the Telegram success message can include the new public IP when OCI has it ready.
+        for _ in range(10):
+            public_ip, private_ip = self._lookup_primary_ip(compute, vcn, template["compartment_id"], item.id)
+            if public_ip or not template.get("assign_public_ip", True):
+                break
+            time.sleep(3)
         return InstanceSummary(
             id=item.id,
             display_name=item.display_name,
             lifecycle_state=item.lifecycle_state,
             availability_domain=item.availability_domain,
             shape=item.shape,
+            public_ip=public_ip,
+            private_ip=private_ip,
+            region=config.get("region"),
         )
 
     def instance_action(self, instance_id: str, action: str) -> str:
