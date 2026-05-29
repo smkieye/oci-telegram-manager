@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block content %}
+<h1>安全设置</h1>
+<div class="grid">
+  <div class="card">
+    <h2>修改 Web 登录密码</h2>
+    <p class="muted">修改后当前登录会失效，需要用新密码重新登录；之后每次登录仍会通过 Telegram 发送 6 位验证码。</p>
+    {% if request.query_params.get('error') == 'current' %}<p class="danger">当前密码不正确。</p>{% endif %}
+    {% if request.query_params.get('error') == 'new' %}<p class="danger">新密码至少 12 位，并且两次输入必须一致。</p>{% endif %}
+    <form method="post" action="/settings/password">
+      <label>当前密码</label><input type="password" name="current_password" required>
+      <label>新密码</label><input type="password" name="new_password" required minlength="12">
+      <label>确认新密码</label><input type="password" name="confirm_password" required minlength="12">
+      <button class="btn primary" type="submit">修改密码</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>当前登录策略</h2>
+    <div class="kv"><b>第一步：</b>Web 密码<br><b>第二步：</b>Telegram 6 位验证码<br><b>验证码有效期：</b>5 分钟<br><b>Cookie：</b>HttpOnly / SameSite，HTTPS 下 Secure</div>
+  </div>
+</div>
+{% endblock %}
