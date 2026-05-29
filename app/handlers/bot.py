@@ -212,10 +212,12 @@ async def _sniper_loop(chat_id: int, account_id: str, context: ContextTypes.DEFA
         if not template:
             await context.bot.send_message(chat_id, "⚠️ 没有抢机模板，请先粘贴/更新模板。")
             return
-        service = OCIService(account.config_path)
-        for attempt in range(1, 61):
+        attempt = 0
+        interval = max(1, int(template.get("interval_seconds", 60)))
+        while True:
+            attempt += 1
             if context.application.bot_data.get(stop_key):
-                await context.bot.send_message(chat_id, f"⏹ 已停止连续抢机。已尝试 {attempt - 1} 次。")
+                await context.bot.send_message(chat_id, f"⏹ 已停止连续抢机。已尝试 {attempt - 1} 轮。")
                 return
             try:
                 if template.get("root_password") == "random":
@@ -227,9 +229,8 @@ async def _sniper_loop(chat_id: int, account_id: str, context: ContextTypes.DEFA
             except Exception as exc:
                 msg = str(exc)
                 if attempt == 1 or attempt % 5 == 0:
-                    await context.bot.send_message(chat_id, f"🔁 第 {attempt}/60 次未成功：{msg[:300]}")
-                await asyncio.sleep(30)
-        await context.bot.send_message(chat_id, "⚠️ 连续抢机结束：60 次仍未成功。")
+                    await context.bot.send_message(chat_id, f"🔁 第 {attempt} 轮未成功，将继续循环直到抢到或手动停止：{msg[:300]}")
+                await asyncio.sleep(interval)
     finally:
         context.application.bot_data.pop(stop_key, None)
         context.application.bot_data.pop(f"sniper_task:{chat_id}:{account_id}", None)
@@ -676,7 +677,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         task = context.application.create_task(_sniper_loop(chat_id, account.id, context))
         context.application.bot_data[task_key] = task
-        await query.message.reply_text("🔁 已启动连续抢机：最多 60 轮，每轮按配置数量开机。", reply_markup=sniper_menu())
+        await query.message.reply_text("🔁 已启动连续抢机：会一直循环，直到抢机成功或你手动点击停止。", reply_markup=sniper_menu())
     elif data == "sniper:stop_loop":
         account = store.get_current()
         if account is None:
