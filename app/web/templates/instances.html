@@ -1,0 +1,28 @@
+{% extends "base.html" %}{% block content %}
+<h1>实例列表</h1>
+{% if account %}<p class="topnote">当前账号：{{ account.name }}</p>{% else %}<p class="danger">暂无当前账号，请先添加账号。</p>{% endif %}
+{% if error %}<div class="card danger">{{ error }}</div>{% endif %}
+<div class="grid">
+{% for item in instances %}
+  <div class="card">
+    <h2>【实例信息】</h2>
+    <div class="kv">
+      <b>用户：</b>[{{ item.account }}] {{ item.name }}<br>
+      <b>状态：</b>{{ item.state }}<br>
+      <b>Region：</b>{{ item.region }}<br>
+      <b>CPU类型：</b>{{ item.arch }}<br>
+      <b>CPU：</b>{{ item.cpu }}<br>
+      <b>内存（GB）：</b>{{ item.memory_gb }}<br>
+      <b>磁盘大小：</b>{{ item.disk_gb }} GB<br>
+      <b>Shape：</b>{{ item.shape }}<br>
+      <b>公网IP：</b>{{ item.public_ip }}
+    </div>
+    <div class="toolbar">
+      <form method="post" action="/instances/action"><input type="hidden" name="instance_id" value="{{ item.id }}"><input type="hidden" name="action" value="START"><button class="btn success" type="submit">启动</button></form>
+      <form method="post" action="/instances/action"><input type="hidden" name="instance_id" value="{{ item.id }}"><input type="hidden" name="action" value="STOP"><button class="btn danger-bg" type="submit">停止</button></form>
+      <form method="post" action="/instances/action"><input type="hidden" name="instance_id" value="{{ item.id }}"><input type="hidden" name="action" value="RESET"><button class="btn primary" type="submit">重启</button></form>
+    </div>
+  </div>
+{% else %}<p class="muted">没有实例。</p>{% endfor %}
+</div>
+{% endblock %}

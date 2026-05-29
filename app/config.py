@@ -37,6 +37,8 @@ class Settings:
     cloudflare_api_token: str | None = None
     cloudflare_zone_id: str | None = None
     default_cloudflare_record: str | None = None
+    web_admin_password: str | None = None
+    web_session_secret: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -61,6 +63,8 @@ class Settings:
             cloudflare_api_token=os.getenv("CLOUDFLARE_API_TOKEN") or None,
             cloudflare_zone_id=os.getenv("CLOUDFLARE_ZONE_ID") or None,
             default_cloudflare_record=os.getenv("DEFAULT_CLOUDFLARE_RECORD") or None,
+            web_admin_password=os.getenv("WEB_ADMIN_PASSWORD") or None,
+            web_session_secret=os.getenv("WEB_SESSION_SECRET") or bot_token,
         )
 
     @property

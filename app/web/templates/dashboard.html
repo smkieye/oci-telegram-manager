@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block content %}
+<h1>首页</h1>
+<div class="grid">
+  <div class="card"><h2>当前账号</h2>{% if current %}<div class="kv"><b>名称：</b>{{ current.name }}<br><b>Region：</b>{{ current.region or '-' }}</div>{% else %}<p class="muted">还没有账号。</p>{% endif %}</div>
+  <div class="card"><h2>账号数量</h2><p style="font-size:34px;margin:0">{{ accounts|length }}</p></div>
+  <div class="card"><h2>抢机任务</h2>{% if tasks %}{% for k,t in tasks.items() %}<p>{{ k }}：{% if t.running %}<span class="ok">运行中</span>{% elif t.success %}<span class="ok">成功</span>{% else %}已停止{% endif %}，{{ t.attempts }} 轮</p>{% endfor %}{% else %}<p class="muted">暂无任务</p>{% endif %}</div>
+</div>
+{% endblock %}

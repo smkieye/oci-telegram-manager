@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block content %}
+<h1>账号管理</h1>
+<div class="grid">
+  <div class="card"><h2>账号列表</h2>{% for a in accounts %}<div class="card" style="margin:10px 0;background:#0f172a"><b>{{ a.name }}</b>{% if a.id == current_id %} <span class="ok">当前</span>{% endif %}<div class="muted">{{ a.region or '-' }}</div><form method="post" action="/accounts/current"><input type="hidden" name="account_id" value="{{ a.id }}"><button class="btn primary" type="submit">切换到此账号</button></form></div>{% else %}<p class="muted">暂无账号。</p>{% endfor %}</div>
+  <div class="card"><h2>新增账号</h2><form method="post" action="/accounts/add" enctype="multipart/form-data"><label>账号名称</label><input name="name" required placeholder="例如：孟买001#自撸"><label>OCI config 内容</label><textarea name="config_text" rows="8" required placeholder="粘贴 [DEFAULT] ..."></textarea><label>oci_api_key.pem</label><input type="file" name="key_file" required><button class="btn success" type="submit">保存账号</button></form></div>
+</div>
+{% endblock %}

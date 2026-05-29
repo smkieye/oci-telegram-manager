@@ -12,3 +12,20 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  oci-telegram-manager-web:
+    build: .
+    container_name: oci-telegram-manager-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: uvicorn app.web.app:app --host 0.0.0.0 --port 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block content %}
+<h1>抢机</h1>
+{% if not account %}<p class="danger">暂无当前账号，请先添加账号。</p>{% else %}<p class="topnote">当前账号：{{ account.name }}</p>{% endif %}
+<div class="grid">
+  <div class="card"><h2>抢机配置</h2><form method="post" action="/sniper/save">
+    <label>开机数量</label><input type="number" min="1" name="count" value="{{ template.count }}">
+    <label>时间间隔（秒）</label><input type="number" min="1" name="interval_seconds" value="{{ template.interval_seconds }}">
+    <label>CPU</label><input type="number" min="1" name="cpu" value="{{ template.cpu }}">
+    <label>内存（GB）</label><input type="number" min="1" name="memory_gb" value="{{ template.memory_gb }}">
+    <label>磁盘大小（GB）</label><input type="number" min="50" name="disk_gb" value="{{ template.disk_gb }}">
+    <label>架构</label><select name="arch"><option value="arm" {% if template.arch=='arm' %}selected{% endif %}>ARM</option><option value="amd" {% if template.arch=='amd' %}selected{% endif %}>AMD</option></select>
+    <label>系统</label><select name="os_type"><option value="ubuntu" {% if template.os_type=='ubuntu' %}selected{% endif %}>Canonical Ubuntu</option><option value="oracle" {% if template.os_type=='oracle' %}selected{% endif %}>Oracle Autonomous Linux</option></select>
+    <label>root 密码（填 random 随机生成）</label><input name="root_password" value="{{ template.root_password }}">
+    <label>实例名称</label><input name="display_name" value="{{ template.display_name }}">
+    <button class="btn primary" type="submit">保存配置</button>
+  </form></div>
+  <div class="card"><h2>任务控制</h2>
+    <div class="toolbar"><form method="post" action="/sniper/start"><button class="btn success" type="submit">开始连续抢机</button></form><form method="post" action="/sniper/once"><button class="btn primary" type="submit">抢一次</button></form><form method="post" action="/sniper/stop"><button class="btn danger-bg" type="submit">停止连续抢机</button></form></div>
+    {% if task %}<h3>当前状态</h3><div class="kv"><b>运行：</b>{{ '是' if task.running else '否' }}<br><b>成功：</b>{{ '是' if task.success else '否' }}<br><b>轮数：</b>{{ task.attempts }}<br><b>最近错误：</b>{{ task.last_error or '-' }}</div>{% if task.message %}<div class="pre">{{ task.message }}</div>{% endif %}{% else %}<p class="muted">暂无 Web 抢机任务。</p>{% endif %}
+  </div>
+</div>
+{% endblock %}
