@@ -98,7 +98,10 @@ fetch_project() {
 write_env() {
   cd "$INSTALL_DIR"
   mkdir -p data/oci
-  chmod 700 data/oci
+  # The container runs as uid 10001 (oci-manager). Host bind mounts must be
+  # readable/writable by that uid, otherwise startup fails with PermissionError.
+  chown -R 10001:users data 2>/dev/null || chown -R 10001:100 data
+  chmod 700 data data/oci
 
   local existing_bot="" existing_users="6327047192" existing_cf_token="" existing_cf_zone="" existing_record=""
   if [[ -f .env ]]; then
