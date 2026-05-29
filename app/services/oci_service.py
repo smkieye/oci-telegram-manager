@@ -19,6 +19,10 @@ class InstanceSummary:
     public_ip: str | None = None
     private_ip: str | None = None
     region: str | None = None
+    cpu: float | int | None = None
+    memory_gb: float | int | None = None
+    disk_gb: float | int | None = None
+    arch: str | None = None
 
 
 class OCIService:
@@ -62,6 +66,16 @@ class OCIService:
             )
             for item in response.data:
                 public_ip, private_ip = self._lookup_primary_ip(compute, vcn, compartment["id"], item.id)
+                shape_config = getattr(item, "shape_config", None)
+                cpu = getattr(shape_config, "ocpus", None) if shape_config else None
+                memory_gb = getattr(shape_config, "memory_in_gbs", None) if shape_config else None
+                disk_gb = self._lookup_boot_volume_size_gb(
+                    oci,
+                    config,
+                    compartment["id"],
+                    item.availability_domain,
+                    item.id,
+                )
                 instances.append(
                     InstanceSummary(
                         id=item.id,
@@ -72,6 +86,10 @@ class OCIService:
                         public_ip=public_ip,
                         private_ip=private_ip,
                         region=config.get("region"),
+                        cpu=cpu,
+                        memory_gb=memory_gb,
+                        disk_gb=disk_gb,
+                        arch=self._instance_arch(item.shape),
                     )
                 )
         return instances
@@ -88,6 +106,36 @@ class OCIService:
             return vnic.public_ip, vnic.private_ip
         except Exception:
             return None, None
+
+    def _lookup_boot_volume_size_gb(self, oci, config, compartment_id: str, availability_domain: str | None, instance_id: str) -> int | None:
+        if not availability_domain:
+            return None
+        try:
+            block = oci.core.BlockstorageClient(config)
+            attachments = block.list_boot_volume_attachments(
+                availability_domain=availability_domain,
+                compartment_id=compartment_id,
+                instance_id=instance_id,
+            ).data
+            if not attachments:
+                return None
+            boot_volume = block.get_boot_volume(attachments[0].boot_volume_id).data
+            return getattr(boot_volume, "size_in_gbs", None)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _instance_arch(shape: str | None) -> str | None:
+        if not shape:
+            return None
+        text = shape.lower()
+        if "a1" in text or "arm" in text:
+            return "ARM"
+        if "e2" in text or "e3" in text or "e4" in text or "amd" in text:
+            return "AMD"
+        if "intel" in text:
+            return "INTEL"
+        return None
 
     def list_availability_domains(self) -> list[str]:
         _oci, config, _compute, _vcn, identity = self._clients()

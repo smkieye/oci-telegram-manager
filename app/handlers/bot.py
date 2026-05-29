@@ -140,6 +140,16 @@ def _format_duration(seconds: float) -> str:
     return f"{days}天{hours}小时{minutes}分钟{secs}秒"
 
 
+def _format_number(value) -> str:
+    if value is None or value == "":
+        return "-"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return str(int(number)) if number.is_integer() else str(number)
+
+
 def _success_message(account: Account, instance, template: dict, attempts: int, started_at: datetime) -> str:
     now = datetime.now()
     arch = str(template.get("arch", "arm")).upper()
@@ -534,17 +544,19 @@ async def list_instances(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     for item in instances:
         text = (
-            f"🖥 {item.display_name}\n"
-            f"账号：{account.name}\n"
-            f"状态：{item.lifecycle_state}\n"
-            f"区域：{item.region or account.region or '-'}\n"
-            f"规格：{item.shape or '-'}\n"
-            f"公网 IP：{item.public_ip or '-'}\n"
-            f"私网 IP：{item.private_ip or '-'}\n"
-            f"ID：`{item.id}`"
+            "【实例信息】 \n\n"
+            f"🖥 用户：[{account.name}] {item.display_name}\n"
+            f"状态： {item.lifecycle_state}\n"
+            f"Region： {item.region or account.region or '-'}\n"
+            f"CPU类型： {item.arch or '-'}\n"
+            f"CPU： {_format_number(item.cpu)}\n"
+            f"内存（GB）： {_format_number(item.memory_gb)}\n"
+            f"磁盘大小（GB）： {_format_number(item.disk_gb)}\n"
+            f"Shape： {item.shape or '-'}\n"
+            f"公网IP： {item.public_ip or '-'}"
         )
         instance_key = _remember_instance_id(context, account.id, item.id)
-        await update.effective_message.reply_text(text, reply_markup=instance_actions(instance_key), parse_mode="Markdown")
+        await update.effective_message.reply_text(text, reply_markup=instance_actions(instance_key))
 
 
 async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
