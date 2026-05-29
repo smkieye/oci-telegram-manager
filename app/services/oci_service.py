@@ -111,8 +111,9 @@ class OCIService:
         if not availability_domain:
             return None
         try:
+            compute = oci.core.ComputeClient(config)
             block = oci.core.BlockstorageClient(config)
-            attachments = block.list_boot_volume_attachments(
+            attachments = compute.list_boot_volume_attachments(
                 availability_domain=availability_domain,
                 compartment_id=compartment_id,
                 instance_id=instance_id,
