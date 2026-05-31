@@ -1,0 +1,83 @@
+{% extends "base.html" %}{% block content %}
+<style>
+.detail-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}.detail-tab{border:1px solid var(--line2);background:#fff;color:#5f7287;padding:10px 14px;border-radius:9px;font-weight:850}.detail-tab.active{border-color:#168de2;background:#eef8ff;color:#0875bf;box-shadow:0 8px 22px rgba(22,141,226,.12)}
+.detail-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 16px}.config-line{font-weight:850;color:#243d55;margin-left:8px}.mini-card{max-width:430px;border-left:5px solid #168de2}.detail-kv{display:grid;grid-template-columns:112px 1fr;gap:9px 12px;align-items:center}.detail-kv .k{font-weight:800;color:#5b6f83}.icon-actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}.square-btn{width:36px;height:34px;border-radius:8px;border:1px solid var(--line2);display:grid;place-items:center;font-weight:900;cursor:pointer;background:#fff}.square-btn.blue{background:#168de2;color:white;border-color:#168de2}.square-btn.gray{background:#edf2f7;color:#596b7d}.square-btn.orange{background:#f59e0b;color:#fff;border-color:#f59e0b}.square-btn.red{background:#ef4444;color:white;border-color:#ef4444}.square-btn.green{background:#22b66e;color:white;border-color:#22b66e}.accordion-row{display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:#f8fbff;color:#355169;font-weight:850}.info-dot{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#168de2;color:white;margin-right:8px}.chart-box{height:360px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(#fff,#fbfdff);position:relative;margin-top:14px}.chart-axis{position:absolute;left:40px;right:30px;bottom:82px;border-top:2px solid #d5dde7}.legend{position:absolute;left:45%;bottom:45px;display:flex;gap:24px;color:#66798e;font-weight:750}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}.two-col{display:grid;grid-template-columns:minmax(320px,430px) 1fr;gap:18px}.soft-note{border:1px dashed var(--line2);background:#f9fcff;border-radius:12px;padding:12px 14px;margin-bottom:12px;color:#657b90}.table.small{min-width:760px}@media(max-width:1000px){.two-col{grid-template-columns:1fr}.config-line{display:block;margin:8px 0 0}}
+</style>
+
+<div class="detail-tabs">
+  {% for item in tabs %}
+    <a class="detail-tab {% if tab == item.key %}active{% endif %}" href="/accounts/{{ account.id }}/details?tab={{ item.key }}"><span>{{ item.icon }}</span> {{ item.label }}</a>
+  {% endfor %}
+</div>
+
+<div class="detail-toolbar">
+  <a class="btn" href="/">返回至配置列表</a>
+  <a class="btn gray-bg" href="/accounts/{{ account.id }}/details?tab={{ tab }}">刷新缓存</a>
+  <span class="config-line">当前配置：{{ account.name }}</span>
+</div>
+
+{% if detail.error %}<div class="soft-note">提示：{{ detail.error }}</div>{% endif %}
+
+{% if tab == 'users' %}
+  {% set info = detail.info %}
+  <div class="grid" style="margin-bottom:16px">
+    <div class="card stat"><div class="stat-label">租户名称</div><div class="stat-num" style="font-size:22px">{{ info.tenant_name }}</div><div class="muted">Home: {{ info.home_region_key }}</div></div>
+    <div class="card stat"><div class="stat-label">当前区域</div><div class="stat-num" style="font-size:22px">{{ account.region or '-' }}</div><div class="muted">已订阅：{{ info.regions|length }} 个 Region</div></div>
+    <div class="card stat"><div class="stat-label">套餐类型</div><div class="stat-num" style="font-size:22px">{{ info.subscription }}</div><div class="muted">账户创建：{{ info.created_at }}</div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><b>用户详情</b><span class="pill pill-blue">{{ info.tenancy_short }}</span></div>
+    <div class="table-wrap"><table class="table small"><thead><tr><th>用户名称</th><th>邮箱/用户 OCID</th><th>状态</th><th>邮箱验证</th><th>MFA</th><th>创建时间</th><th>最后登录</th></tr></thead><tbody>
+      {% for user in detail.users %}<tr><td class="row-title">{{ user.name }}</td><td><span class="pill pill-gray">{{ user.email }}</span></td><td><span class="pill {{ status_class(user.state) }}">{{ user.state }}</span></td><td><span class="pill {{ status_class(user.email_verified) }}">{{ user.email_verified }}</span></td><td><span class="pill {{ status_class(user.mfa) }}">{{ user.mfa }}</span></td><td>{{ user.created_at }}</td><td>{{ user.last_login }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+
+{% elif tab == 'instances' %}
+  <div class="two-col">
+    <div>
+    {% for inst in detail.instances %}
+      <div class="card mini-card" style="margin-bottom:14px">
+        <h3>⚙️ {{ inst.name }}</h3>
+        <div class="detail-kv">
+          <div class="k">Region</div><span class="pill pill-blue">{{ inst.region }}</span>
+          <div class="k">状态</div><span class="pill {{ status_class(inst.state) }}">{{ inst.state }}</span>
+          <div class="k">Shape</div><span class="pill pill-green">{{ inst.shape }}</span>
+          <div class="k">公网IP</div><span class="pill pill-blue">{{ inst.public_ip }}</span>
+          <div class="k">配置</div><span class="pill pill-gray">{{ inst.cpu }} 核 / {{ inst.memory_gb }} GB / {{ inst.disk_gb }} GB</span>
+          <div class="k">可用域</div><span class="pill pill-gray">{{ inst.availability_domain }}</span>
+        </div>
+        <div class="icon-actions">
+          <form class="inline-form" method="post" action="/instances/action"><input type="hidden" name="account_id" value="{{ account.id }}"><input type="hidden" name="instance_id" value="{{ inst.id }}"><input type="hidden" name="action" value="START"><input type="hidden" name="redirect_to" value="/accounts/{{ account.id }}/details?tab=instances"><button class="square-btn" title="开机">⏻</button></form>
+          <form class="inline-form" method="post" action="/instances/action"><input type="hidden" name="account_id" value="{{ account.id }}"><input type="hidden" name="instance_id" value="{{ inst.id }}"><input type="hidden" name="action" value="SOFTRESET"><input type="hidden" name="redirect_to" value="/accounts/{{ account.id }}/details?tab=instances"><button class="square-btn blue" title="重启">↻</button></form>
+          <a class="square-btn gray" href="/sniper" title="抢机配置">⚙</a>
+          <form class="inline-form" method="post" action="/instances/action"><input type="hidden" name="account_id" value="{{ account.id }}"><input type="hidden" name="instance_id" value="{{ inst.id }}"><input type="hidden" name="action" value="STOP"><input type="hidden" name="redirect_to" value="/accounts/{{ account.id }}/details?tab=instances"><button class="square-btn orange" title="停止">■</button></form>
+          <button class="square-btn red" type="button" onclick="alert('删除实例属于高危操作，当前仅保留停止/重启/开机入口。')" title="删除">🗑</button>
+          <a class="square-btn green" href="/accounts/{{ account.id }}/details?tab=instances" title="刷新">⟳</a>
+        </div>
+      </div>
+    {% else %}<div class="empty">当前配置下未查询到实例。</div>{% endfor %}
+    </div>
+    <div>
+      <div class="accordion-row"><span><span class="info-dot">i</span>API配置详情（点击向下展开）</span><span>›</span></div>
+      <div class="accordion-row"><span><span class="info-dot">i</span>网络负载均衡器详情（查看 500MBS AMD 实例公网IP）</span><span>›</span></div>
+    </div>
+  </div>
+
+{% elif tab == 'volumes' %}
+  <div class="panel"><div class="panel-head"><div class="toolbar" style="margin:0"><a class="btn success" href="/accounts/{{ account.id }}/details?tab=volumes">刷新</a><input id="volQ" type="search" placeholder="模糊搜索" oninput="filterTable('volTable','volQ')" style="width:220px;margin:0"><button class="btn danger-bg" type="button" onclick="alert('批量停止/删除存储卷请先在 OCI 控制台确认，当前页面仅展示。')">批量停止</button></div><b>当前位置：{{ account.name }}</b></div>
+    <div class="table-wrap"><table class="table" id="volTable"><thead><tr><th><input type="checkbox"></th><th>名称</th><th>可用域</th><th>状态</th><th>已附加实例</th><th>VPU</th><th>硬盘（GB）</th><th>创建时间</th><th>操作</th></tr></thead><tbody>{% for v in detail.volumes %}<tr data-search="{{ (v.name ~ ' ' ~ v.ad ~ ' ' ~ v.attached)|lower }}"><td><input type="checkbox"></td><td>{{ v.name }}</td><td><span class="pill pill-gray">{{ v.ad }}</span></td><td><span class="pill {{ status_class(v.state) }}">{{ v.state }}</span></td><td><span class="pill pill-blue">{{ v.attached }}</span></td><td>{{ v.vpu }}</td><td>{{ v.size }}</td><td>{{ v.created_at }}</td><td><a class="link" href="#">编辑</a> <button class="link danger" onclick="alert('高危操作已禁用')">停止</button></td></tr>{% else %}<tr><td colspan="9"><div class="empty">未查询到存储卷。</div></td></tr>{% endfor %}</tbody></table></div><div class="panel-head" style="border-top:1px solid var(--line);border-bottom:0"><div class="muted">Total {{ detail.volumes|length }}　10/page　当前页 1　Go to <input style="width:54px;margin:0 0 0 6px;padding:6px 8px" value="1" readonly></div></div></div>
+
+{% elif tab == 'network' %}
+  <div class="panel"><div class="panel-head"><div class="toolbar" style="margin:0"><a class="btn success" href="/accounts/{{ account.id }}/details?tab=network">刷新</a><input id="netQ" type="search" placeholder="模糊搜索" oninput="filterTable('netTable','netQ')" style="width:220px;margin:0"><button class="btn danger-bg" type="button" onclick="alert('批量删除 VCN 属于高危操作，当前页面仅展示。')">批量删除</button></div><b>当前配置：{{ account.name }}</b></div>
+    <div class="table-wrap"><table class="table" id="netTable"><thead><tr><th><input type="checkbox"></th><th>名称</th><th>状态</th><th>子网访问</th><th>创建时间</th><th>操作</th></tr></thead><tbody>{% for vcn in detail.vcns %}<tr data-search="{{ (vcn.name ~ ' ' ~ vcn.access)|lower }}"><td><input type="checkbox"></td><td>{{ vcn.name }}</td><td><span class="pill {{ status_class(vcn.state) }}">{{ vcn.state }}</span></td><td><span class="pill pill-green">{{ vcn.access }}</span></td><td>{{ vcn.created_at }}</td><td><a class="link" href="#">安全防护</a> <button class="link danger" onclick="alert('高危操作已禁用')">删除</button></td></tr>{% else %}<tr><td colspan="6"><div class="empty">未查询到虚拟云网络。</div></td></tr>{% endfor %}</tbody></table></div><div class="panel-head" style="border-top:1px solid var(--line);border-bottom:0"><div class="muted">Total {{ detail.vcns|length }}　10/page　当前页 1　Go to <input style="width:54px;margin:0 0 0 6px;padding:6px 8px" value="1" readonly></div></div></div>
+
+{% elif tab == 'traffic' %}
+  {% set s = detail.summary %}
+  <div class="detail-toolbar"><select><option>{{ s.region }}</option></select><select><option>实例</option></select><select><option>vnic</option></select><select><option>按小时统计</option></select><input type="datetime-local"><input type="datetime-local"><button class="btn primary" type="button">查询</button></div>
+  <div class="two-col"><div class="card"><h3>配置详情</h3><div class="detail-kv"><div class="k">当前配置</div><span>{{ s.current }}</span><div class="k">规格</div><span>{{ s.region }}</span><div class="k">实例数量</div><span>{{ s.instance_count }}</span><div class="k">入总流量</div><span>{{ s.inbound }}</span><div class="k">出总流量</div><span>{{ s.outbound }}</span></div></div><div class="chart-box"><div class="chart-axis"></div><div class="legend"><span><i style="background:#168de2"></i>入总流量</span><span><i style="background:#22b66e"></i>出总流量</span></div></div></div>
+{% endif %}
+
+<script>
+function filterTable(tableId,inputId){const q=document.getElementById(inputId).value.trim().toLowerCase();document.querySelectorAll(`#${tableId} tbody tr[data-search]`).forEach(r=>r.style.display=(!q||r.dataset.search.includes(q))?'':'none')}
+</script>
+{% endblock %}

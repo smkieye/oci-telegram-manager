@@ -245,6 +245,196 @@ def _dashboard_rows(accounts: list[Account]) -> list[dict[str, object]]:
     return rows
 
 
+def _read_oci_config_values(account: Account) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not account.config_path.exists():
+        return values
+    for raw_line in account.config_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("[") or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def _short_ocid(value: str | None) -> str:
+    if not value:
+        return "-"
+    if len(value) <= 42:
+        return value
+    return f"{value[:28]}...{value[-10:]}"
+
+
+def _obj_time(value: object) -> str:
+    if not value:
+        return "-"
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value)[:19]
+
+
+def _status_class(value: str | None) -> str:
+    text = (value or "").upper()
+    if text in {"ACTIVE", "RUNNING", "AVAILABLE", "SUCCEEDED", "VERIFIED"} or "已" in (value or ""):
+        return "pill-green"
+    if text in {"STOPPED", "TERMINATED", "DELETED", "FAILED"} or "否" in (value or ""):
+        return "pill-red"
+    if text in {"STOPPING", "STARTING", "PROVISIONING", "UPDATING"}:
+        return "pill-warn"
+    return "pill-gray"
+
+
+def _tenant_detail(account: Account) -> dict[str, object]:
+    cfg = _read_oci_config_values(account)
+    info = {
+        "name": account.name,
+        "tenant_name": "-",
+        "home_region_key": "-",
+        "tenancy_id": cfg.get("tenancy", "-"),
+        "description": "-",
+        "regions": [account.region or cfg.get("region") or "-"],
+        "created_at": _format_created_at(account.created_at),
+        "subscription": "PAYG / Free Tier",
+        "tenant_type": "PERSONAL",
+        "upgrade_state": "-",
+        "currency": "-",
+        "payment_completed": "-",
+    }
+    users: list[dict[str, str]] = []
+    error = ""
+    try:
+        service = OCIService(account.config_path)
+        oci, config, _compute, _vcn, identity = service._clients()
+        tenancy = identity.get_tenancy(config["tenancy"]).data
+        info.update(
+            {
+                "tenant_name": getattr(tenancy, "name", None) or getattr(tenancy, "id", "-"),
+                "description": getattr(tenancy, "description", None) or "-",
+                "home_region_key": getattr(tenancy, "home_region_key", None) or "-",
+                "tenancy_id": getattr(tenancy, "id", cfg.get("tenancy", "-")),
+            }
+        )
+        if getattr(tenancy, "time_created", None):
+            info["created_at"] = _obj_time(tenancy.time_created)
+        try:
+            regions = identity.list_region_subscriptions(config["tenancy"]).data
+            info["regions"] = [item.region_name for item in regions if getattr(item, "region_name", None)] or info["regions"]
+        except Exception:
+            pass
+        response = oci.pagination.list_call_get_all_results(identity.list_users, config["tenancy"])
+        for user in response.data:
+            email = getattr(user, "email", None) or getattr(user, "name", "-")
+            users.append(
+                {
+                    "name": getattr(user, "name", None) or email,
+                    "email": email,
+                    "state": getattr(user, "lifecycle_state", None) or "-",
+                    "email_verified": "已验证" if getattr(user, "email_verified", False) else "未验证",
+                    "mfa": "已绑定" if getattr(user, "is_mfa_activated", False) else "未绑定",
+                    "created_at": _obj_time(getattr(user, "time_created", None)),
+                    "last_login": _obj_time(getattr(user, "last_successful_login_time", None)),
+                }
+            )
+    except Exception as exc:  # noqa: BLE001 - details page should still render without live OCI access
+        error = str(exc)[:500]
+    if not users:
+        users.append(
+            {
+                "name": cfg.get("user", "默认用户"),
+                "email": cfg.get("user", "-"),
+                "state": "ACTIVE" if not error else "-",
+                "email_verified": "-",
+                "mfa": "-",
+                "created_at": info["created_at"],
+                "last_login": "-",
+            }
+        )
+    info["tenancy_short"] = _short_ocid(str(info.get("tenancy_id") or ""))
+    return {"info": info, "users": users, "error": error}
+
+
+def _instances_detail(account: Account) -> dict[str, object]:
+    error = ""
+    instances: list[dict[str, str]] = []
+    try:
+        instances = [_instance_view(account, item) | {"availability_domain": item.availability_domain or "-"} for item in OCIService(account.config_path).list_instances()]
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)[:500]
+    return {"instances": instances, "error": error}
+
+
+def _volumes_detail(account: Account) -> dict[str, object]:
+    rows: list[dict[str, str]] = []
+    error = ""
+    try:
+        service = OCIService(account.config_path)
+        oci, config, compute, _vcn, _identity = service._clients()
+        block = oci.core.BlockstorageClient(config)
+        instance_names = {item.id: item.display_name for item in service.list_instances()}
+        for compartment in service.list_compartments():
+            for ad in service.list_availability_domains():
+                for volume in block.list_boot_volumes(ad, compartment["id"]).data:
+                    attached = "-"
+                    try:
+                        attachments = compute.list_boot_volume_attachments(ad, compartment["id"], boot_volume_id=volume.id).data
+                        if attachments:
+                            attached = instance_names.get(attachments[0].instance_id, attachments[0].instance_id)
+                    except Exception:
+                        pass
+                    rows.append(
+                        {
+                            "id": volume.id,
+                            "name": getattr(volume, "display_name", None) or "Boot Volume",
+                            "ad": getattr(volume, "availability_domain", None) or ad,
+                            "state": getattr(volume, "lifecycle_state", None) or "-",
+                            "attached": attached,
+                            "vpu": str(getattr(volume, "vpus_per_gb", None) or "-"),
+                            "size": str(getattr(volume, "size_in_gbs", None) or "-"),
+                            "created_at": _obj_time(getattr(volume, "time_created", None)),
+                        }
+                    )
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)[:500]
+    return {"volumes": rows, "error": error}
+
+
+def _network_detail(account: Account) -> dict[str, object]:
+    rows: list[dict[str, str]] = []
+    error = ""
+    try:
+        service = OCIService(account.config_path)
+        _oci, _config, _compute, vcn, _identity = service._clients()
+        for compartment in service.list_compartments():
+            for item in vcn.list_vcns(compartment["id"]).data:
+                rows.append(
+                    {
+                        "id": item.id,
+                        "name": getattr(item, "display_name", None) or getattr(item, "cidr_block", "VCN"),
+                        "state": getattr(item, "lifecycle_state", None) or "-",
+                        "access": getattr(item, "cidr_block", None) or "-",
+                        "created_at": _obj_time(getattr(item, "time_created", None)),
+                    }
+                )
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)[:500]
+    return {"vcns": rows, "error": error}
+
+
+def _traffic_detail(account: Account) -> dict[str, object]:
+    instances = _instances_detail(account).get("instances", [])
+    return {
+        "summary": {
+            "current": account.name,
+            "region": account.region or "-",
+            "instance_count": len(instances),
+            "inbound": "-",
+            "outbound": "-",
+        },
+        "error": "流量图表目前提供 oci-helper 风格筛选与占位展示；OCI Monitoring 指标接入后可显示真实曲线。",
+    }
+
+
 def _success_message(account: Account, instance, template: dict[str, Any], attempts: int, started_at: datetime) -> str:
     now = datetime.now()
     duration = _format_duration((now - started_at).total_seconds())
@@ -451,6 +641,43 @@ async def add_account(
     return RedirectResponse("/accounts", status_code=303)
 
 
+@app.get("/accounts/{account_id}/details", response_class=HTMLResponse)
+async def account_details(account_id: str, request: Request, _: None = Depends(require_auth)):
+    account = store.get_account(account_id)
+    tab = request.query_params.get("tab", "users")
+    if tab not in {"users", "instances", "volumes", "network", "traffic"}:
+        tab = "users"
+    detail: dict[str, object]
+    if tab == "instances":
+        detail = _instances_detail(account)
+    elif tab == "volumes":
+        detail = _volumes_detail(account)
+    elif tab == "network":
+        detail = _network_detail(account)
+    elif tab == "traffic":
+        detail = _traffic_detail(account)
+    else:
+        detail = _tenant_detail(account)
+    tabs = [
+        {"key": "users", "label": "用户详情", "icon": "👤"},
+        {"key": "instances", "label": "实例详情", "icon": "🖥"},
+        {"key": "volumes", "label": "存储卷列表", "icon": "💽"},
+        {"key": "network", "label": "虚拟云网络", "icon": "🌐"},
+        {"key": "traffic", "label": "流量统计", "icon": "📈"},
+    ]
+    return templates.TemplateResponse(
+        "account_detail.html",
+        {
+            "request": request,
+            "account": account,
+            "tab": tab,
+            "tabs": tabs,
+            "detail": detail,
+            "status_class": _status_class,
+        },
+    )
+
+
 @app.get("/instances", response_class=HTMLResponse)
 async def instances_page(request: Request, _: None = Depends(require_auth)):
     account = _current_account()
@@ -469,12 +696,18 @@ async def instances_page(request: Request, _: None = Depends(require_auth)):
 
 
 @app.post("/instances/action")
-async def instance_action(instance_id: str = Form(...), action: str = Form(...), _: None = Depends(require_auth)):
-    account = _current_account()
+async def instance_action(
+    instance_id: str = Form(...),
+    action: str = Form(...),
+    account_id: str | None = Form(None),
+    redirect_to: str = Form("/instances"),
+    _: None = Depends(require_auth),
+):
+    account = store.set_current(account_id) if account_id else _current_account()
     if not account:
         return RedirectResponse("/instances", status_code=303)
     OCIService(account.config_path).instance_action(instance_id, action)
-    return RedirectResponse("/instances", status_code=303)
+    return RedirectResponse(redirect_to if redirect_to.startswith("/") else "/instances", status_code=303)
 
 
 @app.get("/sniper", response_class=HTMLResponse)

@@ -55,7 +55,7 @@
           <tr data-search="{{ (row.account.name ~ ' ' ~ (row.account.region or '') ~ ' ' ~ row.account.id)|lower }}" data-task="{{ row.task_state }}" data-valid="{{ '1' if row.valid else '0' }}">
             <td><input class="row-check" type="checkbox" name="account_ids" value="{{ row.account.id }}"></td>
             <td>
-              <a class="row-title" href="/accounts">{{ row.account.name }}</a>
+              <a class="row-title" href="/accounts/{{ row.account.id }}/details">{{ row.account.name }}</a>
               {% if row.account.id == current_id %}<span class="pill pill-green">当前</span>{% endif %}
             </td>
             <td><span class="pill pill-green">{{ row.account.id }}</span></td>
@@ -70,7 +70,7 @@
             <td><span class="pill pill-blue">{{ row.created_at }}</span></td>
             <td><span class="pill pill-gray">未设置</span></td>
             <td class="ops">
-              <form class="inline-form" method="post" action="/accounts/current"><input type="hidden" name="account_id" value="{{ row.account.id }}"><button class="link" type="submit">详情</button></form>
+              <a class="link" href="/accounts/{{ row.account.id }}/details">详情</a>
               <form class="inline-form" method="post" action="/sniper/once"><input type="hidden" name="account_id" value="{{ row.account.id }}"><input type="hidden" name="redirect_to" value="/"><button class="link ok-link" type="submit">执行</button></form>
               <form class="inline-form" method="post" action="/sniper/start"><input type="hidden" name="account_id" value="{{ row.account.id }}"><input type="hidden" name="redirect_to" value="/"><button class="link warn-link" type="submit">开机</button></form>
               <form class="inline-form" method="post" action="/sniper/stop"><input type="hidden" name="account_id" value="{{ row.account.id }}"><input type="hidden" name="redirect_to" value="/"><button class="link gray-link" type="submit">停止</button></form>
