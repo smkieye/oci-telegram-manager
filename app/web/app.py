@@ -374,10 +374,10 @@ def _volumes_detail(account: Account) -> dict[str, object]:
         instance_names = {item.id: item.display_name for item in service.list_instances()}
         for compartment in service.list_compartments():
             for ad in service.list_availability_domains():
-                for volume in block.list_boot_volumes(ad, compartment["id"]).data:
+                for volume in block.list_boot_volumes(compartment_id=compartment["id"], availability_domain=ad).data:
                     attached = "-"
                     try:
-                        attachments = compute.list_boot_volume_attachments(ad, compartment["id"], boot_volume_id=volume.id).data
+                        attachments = compute.list_boot_volume_attachments(availability_domain=ad, compartment_id=compartment["id"], boot_volume_id=volume.id).data
                         if attachments:
                             attached = instance_names.get(attachments[0].instance_id, attachments[0].instance_id)
                     except Exception:
@@ -421,8 +421,8 @@ def _network_detail(account: Account) -> dict[str, object]:
     return {"vcns": rows, "error": error}
 
 
-def _traffic_detail(account: Account) -> dict[str, object]:
-    instances = _instances_detail(account).get("instances", [])
+def _traffic_detail(account: Account, instances: list[dict[str, str]] | None = None) -> dict[str, object]:
+    instances = instances if instances is not None else _instances_detail(account).get("instances", [])
     return {
         "summary": {
             "current": account.name,
@@ -431,8 +431,23 @@ def _traffic_detail(account: Account) -> dict[str, object]:
             "inbound": "-",
             "outbound": "-",
         },
-        "error": "流量图表目前提供 oci-helper 风格筛选与占位展示；OCI Monitoring 指标接入后可显示真实曲线。",
+        "conditions": {
+            "regions": [account.region or "-"],
+            "instances": instances,
+            "vnics": [],
+        },
+        "chart": {"time": [], "inbound": [], "outbound": []},
+        "error": "已按 oci-helper 的 /traffic/getCondition、/traffic/fetchInstances、/traffic/fetchVnics、/traffic/data 页面结构预留筛选和图表；真实用量曲线需要接入 OCI Monitoring 后展示。",
     }
+
+
+def _all_account_details(account: Account) -> dict[str, dict[str, object]]:
+    tenant = _tenant_detail(account)
+    instances = _instances_detail(account)
+    volumes = _volumes_detail(account)
+    network = _network_detail(account)
+    traffic = _traffic_detail(account, instances.get("instances", []))
+    return {"tenant": tenant, "instances": instances, "volumes": volumes, "network": network, "traffic": traffic}
 
 
 def _success_message(account: Account, instance, template: dict[str, Any], attempts: int, started_at: datetime) -> str:
@@ -644,24 +659,13 @@ async def add_account(
 @app.get("/accounts/{account_id}/details", response_class=HTMLResponse)
 async def account_details(account_id: str, request: Request, _: None = Depends(require_auth)):
     account = store.get_account(account_id)
-    tab = request.query_params.get("tab", "users")
-    if tab not in {"users", "instances", "volumes", "network", "traffic"}:
-        tab = "users"
-    detail: dict[str, object]
-    if tab == "instances":
-        detail = _instances_detail(account)
-    elif tab == "volumes":
-        detail = _volumes_detail(account)
-    elif tab == "network":
-        detail = _network_detail(account)
-    elif tab == "traffic":
-        detail = _traffic_detail(account)
-    else:
-        detail = _tenant_detail(account)
+    active_tab = request.query_params.get("tab", "instances")
+    if active_tab not in {"tenant", "instances", "volumes", "network", "traffic"}:
+        active_tab = "instances"
     tabs = [
-        {"key": "users", "label": "用户详情", "icon": "👤"},
+        {"key": "tenant", "label": "租户详情", "icon": "👤"},
         {"key": "instances", "label": "实例详情", "icon": "🖥"},
-        {"key": "volumes", "label": "存储卷列表", "icon": "💽"},
+        {"key": "volumes", "label": "引导卷列表", "icon": "💽"},
         {"key": "network", "label": "虚拟云网络", "icon": "🌐"},
         {"key": "traffic", "label": "流量统计", "icon": "📈"},
     ]
@@ -670,9 +674,9 @@ async def account_details(account_id: str, request: Request, _: None = Depends(r
         {
             "request": request,
             "account": account,
-            "tab": tab,
+            "tab": active_tab,
             "tabs": tabs,
-            "detail": detail,
+            "details": _all_account_details(account),
             "status_class": _status_class,
         },
     )
