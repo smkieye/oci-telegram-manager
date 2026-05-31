@@ -1,8 +1,118 @@
 {% extends "base.html" %}{% block content %}
-<h1>首页</h1>
-<div class="grid">
-  <div class="card"><h2>当前账号</h2>{% if current %}<div class="kv"><b>名称：</b>{{ current.name }}<br><b>Region：</b>{{ current.region or '-' }}</div>{% else %}<p class="muted">还没有账号。</p>{% endif %}</div>
-  <div class="card"><h2>账号数量</h2><p style="font-size:34px;margin:0">{{ accounts|length }}</p></div>
-  <div class="card"><h2>抢机任务</h2>{% if tasks %}{% for k,t in tasks.items() %}<p>{{ k }}：{% if t.running %}<span class="ok">运行中</span>{% elif t.success %}<span class="ok">成功</span>{% else %}已停止{% endif %}，{{ t.attempts }} 轮</p>{% endfor %}{% else %}<p class="muted">暂无任务</p>{% endif %}</div>
+<div class="page-title">
+  <div>
+    <h1>主页</h1>
+    <div class="muted">参照 oci-helper 风格的配置总览、快捷筛选与抢机操作入口。</div>
+  </div>
+  <div class="toolbar"><a class="btn success" href="/">刷新</a><a class="btn primary" href="/accounts">新增配置</a></div>
 </div>
+
+<div class="grid" style="margin-bottom:16px">
+  <div class="card stat"><div class="stat-label">配置总数</div><div class="stat-num">{{ stats.total }}</div><div class="muted">已导入 OCI 账号配置</div></div>
+  <div class="card stat"><div class="stat-label">有效配置</div><div class="stat-num">{{ stats.valid }}</div><div class="muted">config + pem 文件校验通过</div></div>
+  <div class="card stat"><div class="stat-label">抢机任务</div><div class="stat-num">{{ stats.running_tasks }}</div><div class="muted">当前运行中的开机任务</div></div>
+  <div class="card stat"><div class="stat-label">当前账号</div><div class="stat-num" style="font-size:20px;margin-top:10px">{{ current.name if current else '-' }}</div><div class="muted">{{ current.region if current and current.region else '未选择 Region' }}</div></div>
+</div>
+
+<div id="batchForm">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="toolbar" style="margin:0">
+        <button class="btn danger-bg" type="button" onclick="submitBatchDelete()">批量删除</button>
+        <a class="btn warn-bg" href="/sniper">批量开机</a>
+        <a class="btn primary" href="/instances">批量重启</a>
+        <button class="btn success" type="button" onclick="activateRows()">一键激活</button>
+        <button class="btn gray-bg" type="button" onclick="resetFilters()">重置筛选</button>
+      </div>
+      <div class="filters">
+        <input id="q" type="search" placeholder="模糊搜索名称/区域" oninput="filterRows()">
+        <select id="taskFilter" onchange="filterRows()">
+          <option value="">开机任务状态筛选</option>
+          <option value="running">运行中</option>
+          <option value="success">成功</option>
+          <option value="idle">无开机任务</option>
+          <option value="stopped">已停止</option>
+        </select>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="table" id="configTable">
+        <thead>
+          <tr>
+            <th><input type="checkbox" onclick="toggleAll(this)"></th>
+            <th>名称（点击修改）</th>
+            <th>用户名</th>
+            <th>区域</th>
+            <th>开机任务状态</th>
+            <th>套餐类型</th>
+            <th>账户创建时间</th>
+            <th>专属代理</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          <tr data-search="{{ (row.account.name ~ ' ' ~ (row.account.region or '') ~ ' ' ~ row.account.id)|lower }}" data-task="{{ row.task_state }}" data-valid="{{ '1' if row.valid else '0' }}">
+            <td><input class="row-check" type="checkbox" name="account_ids" value="{{ row.account.id }}"></td>
+            <td>
+              <a class="row-title" href="/accounts">{{ row.account.name }}</a>
+              {% if row.account.id == current_id %}<span class="pill pill-green">当前</span>{% endif %}
+            </td>
+            <td><span class="pill pill-green">{{ row.account.id }}</span></td>
+            <td><span class="pill pill-blue">{{ row.account.region or '-' }}</span></td>
+            <td>
+              {% if row.task_state == 'running' %}<span class="pill pill-warn">运行中 · {{ row.task_attempts }} 轮</span>
+              {% elif row.task_state == 'success' %}<span class="pill pill-green">成功 · {{ row.task_attempts }} 轮</span>
+              {% elif row.task_state == 'stopped' %}<span class="pill pill-gray">已停止 · {{ row.task_attempts }} 轮</span>
+              {% else %}<span class="pill pill-gray">无开机任务</span>{% endif %}
+            </td>
+            <td>{% if row.valid %}<span class="pill pill-green">PAYG</span>{% else %}<span class="pill pill-red">配置异常</span>{% endif %}</td>
+            <td><span class="pill pill-blue">{{ row.created_at }}</span></td>
+            <td><span class="pill pill-gray">未设置</span></td>
+            <td class="ops">
+              <form class="inline-form" method="post" action="/accounts/current"><input type="hidden" name="account_id" value="{{ row.account.id }}"><button class="link" type="submit">详情</button></form>
+              <form class="inline-form" method="post" action="/sniper/once"><input type="hidden" name="account_id" value="{{ row.account.id }}"><input type="hidden" name="redirect_to" value="/"><button class="link ok-link" type="submit">执行</button></form>
+              <form class="inline-form" method="post" action="/sniper/start"><input type="hidden" name="account_id" value="{{ row.account.id }}"><input type="hidden" name="redirect_to" value="/"><button class="link warn-link" type="submit">开机</button></form>
+              <form class="inline-form" method="post" action="/sniper/stop"><input type="hidden" name="account_id" value="{{ row.account.id }}"><input type="hidden" name="redirect_to" value="/"><button class="link gray-link" type="submit">停止</button></form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9"><div class="empty">暂无配置，请点击“新增配置”导入 OCI config 和 oci_api_key.pem。</div></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="panel-head" style="border-top:1px solid var(--line);border-bottom:0">
+      <div class="muted">Total {{ rows|length }}　10/page　当前页 1　Go to <input style="width:54px;margin:0 0 0 6px;padding:6px 8px" value="1" readonly></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleAll(box){document.querySelectorAll('.row-check').forEach(cb=>cb.checked=box.checked)}
+function filterRows(){
+  const q=document.getElementById('q').value.trim().toLowerCase();
+  const t=document.getElementById('taskFilter').value;
+  document.querySelectorAll('#configTable tbody tr[data-search]').forEach(row=>{
+    const okQ=!q || row.dataset.search.includes(q);
+    const okT=!t || row.dataset.task===t;
+    row.style.display=(okQ && okT)?'':'none';
+  });
+}
+function resetFilters(){document.getElementById('q').value='';document.getElementById('taskFilter').value='';filterRows()}
+function submitBatchDelete(){
+  const checked=[...document.querySelectorAll('.row-check:checked')].map(cb=>cb.value);
+  if(!checked.length){alert('请先勾选需要删除的配置。');return}
+  if(!confirm('确定删除选中的配置吗？此操作会移除服务器上的账号配置文件。')) return;
+  const form=document.createElement('form');
+  form.method='post';form.action='/accounts/batch-delete';
+  checked.forEach(id=>{const input=document.createElement('input');input.type='hidden';input.name='account_ids';input.value=id;form.appendChild(input)});
+  document.body.appendChild(form);form.submit();
+}
+function activateRows(){
+  let total=0, bad=0;
+  document.querySelectorAll('#configTable tbody tr[data-search]').forEach(row=>{total++; if(row.dataset.valid!=='1') bad++; row.style.outline=row.dataset.valid==='1'?'2px solid rgba(34,182,110,.25)':'2px solid rgba(239,68,68,.25)'});
+  alert(`激活检查完成：${total-bad} 个配置可用，${bad} 个配置异常。`);
+}
+</script>
 {% endblock %}

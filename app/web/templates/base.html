@@ -3,23 +3,42 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title or 'OCI Manager' }}</title>
+  <title>{{ title or 'oci-helper' }}</title>
   <style>
-    :root{--bg:#0f172a;--panel:#111827;--card:#1f2937;--muted:#94a3b8;--text:#e5e7eb;--brand:#38bdf8;--ok:#22c55e;--danger:#ef4444;--line:#334155}
-    *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#020617,#111827);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    a{color:inherit;text-decoration:none}.wrap{max-width:1120px;margin:0 auto;padding:18px}.nav{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:18px}.navlinks{display:flex;gap:8px;flex-wrap:wrap}.nav a,.btn{background:#1e293b;border:1px solid var(--line);border-radius:12px;padding:9px 14px;display:inline-block}.nav a:hover,.btn:hover{border-color:var(--brand)}
-    .brand{font-weight:800;color:#fff}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.card{background:rgba(31,41,55,.86);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
-    .muted{color:var(--muted)}.ok{color:var(--ok)}.danger{color:var(--danger)} h1,h2,h3{margin:.2rem 0 1rem}.kv{line-height:1.9}.kv b{display:inline-block;min-width:110px;color:#cbd5e1}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-    input,textarea,select{width:100%;padding:10px 12px;margin:6px 0 12px;background:#0f172a;color:var(--text);border:1px solid var(--line);border-radius:10px} label{color:#cbd5e1;font-size:14px}.btn{cursor:pointer;color:var(--text)}button.btn{font:inherit}.primary{background:#0369a1}.success{background:#166534}.danger-bg{background:#7f1d1d}.pre{white-space:pre-wrap;background:#020617;border:1px solid var(--line);padding:14px;border-radius:12px}.topnote{margin-bottom:12px;color:#bae6fd}
+    :root{
+      --nav:#0b4a77;--nav2:#0f5f9b;--sidebar:#0b4773;--sidebar-active:#1e9be9;
+      --bg:#eef7ff;--bg2:#f8fbff;--panel:#ffffff;--line:#d9e8f5;--line2:#c7d9ea;
+      --text:#1f2d3d;--muted:#72859a;--brand:#168de2;--brand2:#35b5ff;
+      --ok:#22b66e;--warn:#f59e0b;--danger:#ef4444;--gray:#8ea3b7;
+      --shadow:0 16px 40px rgba(38,91,137,.12)
+    }
+    *{box-sizing:border-box}html{height:100%}body{min-height:100%;margin:0;color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(135deg,var(--bg),#f6fbff 48%,#eaf6ff)}
+    a{color:inherit;text-decoration:none}button,input,textarea,select{font:inherit}.app-shell{display:grid;grid-template-columns:218px 1fr;min-height:100vh}.sidebar{background:linear-gradient(180deg,var(--sidebar),#07385f);color:#e8f7ff;padding:18px 12px;box-shadow:6px 0 24px rgba(7,56,95,.14);position:sticky;top:0;height:100vh}.brand{height:46px;display:flex;align-items:center;gap:10px;font-size:22px;font-weight:800;color:#bdeaff;letter-spacing:.2px}.brand .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#65d5ff,#168de2);display:grid;place-items:center;color:white;box-shadow:0 8px 20px rgba(21,141,226,.38)}.navlinks{margin-top:22px;display:flex;flex-direction:column;gap:8px}.navlinks a{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:10px;color:#effaff;font-weight:650;transition:.18s}.navlinks a:hover,.navlinks a.active{background:linear-gradient(90deg,var(--sidebar-active),#39b7ff);box-shadow:0 10px 24px rgba(30,155,233,.28)}.navlinks .ico{width:20px;text-align:center}.main{min-width:0}.topbar{height:58px;background:linear-gradient(90deg,var(--nav),var(--nav2));display:flex;align-items:center;justify-content:space-between;padding:0 20px;color:#fff;box-shadow:0 8px 24px rgba(7,56,95,.18);position:sticky;top:0;z-index:10}.topbar-title{font-weight:800;color:#d8f4ff}.top-actions{display:flex;gap:10px;align-items:center}.wrap{padding:22px;max-width:1500px;margin:0 auto}.page-title{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin:4px 0 16px}h1,h2,h3{margin:.2rem 0 .8rem}h1{font-size:28px}.muted{color:var(--muted)}.ok{color:var(--ok)}.danger{color:var(--danger)}.warn{color:var(--warn)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}.card{background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:var(--shadow)}.stat{position:relative;overflow:hidden}.stat:after{content:"";position:absolute;right:-30px;top:-42px;width:118px;height:118px;background:linear-gradient(135deg,rgba(53,181,255,.2),rgba(22,141,226,.05));border-radius:999px}.stat-num{font-size:34px;font-weight:850;color:#116eaf}.stat-label{color:var(--muted);font-weight:650}.kv{line-height:1.9}.kv b{display:inline-block;min-width:110px;color:#40566c}.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}.panel{background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}.panel-head{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}.table-wrap{overflow:auto}.table{width:100%;border-collapse:separate;border-spacing:0;min-width:980px}.table th,.table td{padding:13px 12px;border-bottom:1px solid #eef4fa;text-align:left;white-space:nowrap;font-size:14px}.table th{background:#f4f9fe;color:#61758b;font-weight:800}.table tr:hover td{background:#f9fcff}.row-title{font-weight:800;color:#1f3f5d}.pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;border:1px solid transparent}.pill-blue{background:#e7f4ff;color:#0976bd;border-color:#cbe8ff}.pill-green{background:#e8fbf1;color:#0e9154;border-color:#c9f2dc}.pill-gray{background:#f2f5f8;color:#718397;border-color:#dbe5ee}.pill-warn{background:#fff6df;color:#b66b00;border-color:#ffe4a5}.pill-red{background:#fff0f0;color:#d73535;border-color:#ffd2d2}.btn{border:1px solid var(--line2);border-radius:10px;padding:9px 13px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;background:#fff;color:#27506f;font-weight:750;line-height:1}.btn:hover{filter:brightness(.98);border-color:var(--brand2)}button.btn{appearance:none}.primary{background:#168de2;color:white;border-color:#168de2}.success{background:#20b86b;color:white;border-color:#20b86b}.danger-bg{background:#ef4444;color:white;border-color:#ef4444}.warn-bg{background:#f59e0b;color:white;border-color:#f59e0b}.gray-bg{background:#eef3f7;color:#587087}.link{border:0;background:transparent;padding:0;color:#168de2;font-weight:800;cursor:pointer}.link.ok-link{color:#18a05e}.link.warn-link{color:#d98200}.link.gray-link{color:#6d7e8f}input,textarea,select{width:100%;padding:10px 12px;margin:6px 0 12px;background:#fff;color:var(--text);border:1px solid var(--line2);border-radius:10px}input[type="checkbox"]{width:auto;margin:0}label{color:#52687e;font-size:14px;font-weight:700}.pre{white-space:pre-wrap;background:#f6fbff;border:1px solid var(--line);padding:14px;border-radius:12px}.topnote{margin-bottom:12px;color:#0b78bc}.inline-form{display:inline}.ops{display:flex;gap:9px;align-items:center}.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.filters input,.filters select{width:auto;min-width:190px;margin:0}.empty{padding:30px;text-align:center;color:var(--muted)}.mobile-logout{display:none}@media (max-width:860px){.app-shell{grid-template-columns:1fr}.sidebar{position:relative;height:auto}.navlinks{flex-direction:row;overflow:auto;margin-top:12px}.navlinks a{white-space:nowrap}.topbar{position:relative}.wrap{padding:14px}.mobile-logout{display:inline-flex}.desktop-logout{display:none}.filters input,.filters select{width:100%;min-width:0}.panel-head{display:block}.app-shell{min-height:auto}}
   </style>
 </head>
-<body><div class="wrap">
-  <div class="nav">
-    <div class="brand">⚡ OCI Manager Web</div>
-    <div class="navlinks">
-      <a href="/">首页</a><a href="/accounts">账号</a><a href="/instances">实例</a><a href="/sniper">抢机</a><a href="/settings">安全设置</a>
-      <form method="post" action="/logout" style="display:inline"><button class="btn" type="submit">退出</button></form>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">☁</span><span>oci-helper</span></div>
+    <nav class="navlinks">
+      <a href="/" class="{% if request.url.path == '/' %}active{% endif %}"><span class="ico">🏠</span>主页</a>
+      <a href="/accounts" class="{% if request.url.path.startswith('/accounts') %}active{% endif %}"><span class="ico">📋</span>配置列表</a>
+      <a href="/sniper" class="{% if request.url.path.startswith('/sniper') %}active{% endif %}"><span class="ico">⚡</span>任务列表</a>
+      <a href="/instances" class="{% if request.url.path.startswith('/instances') %}active{% endif %}"><span class="ico">🖥</span>实例管理</a>
+      <a href="/settings" class="{% if request.url.path.startswith('/settings') %}active{% endif %}"><span class="ico">⚙️</span>系统配置</a>
+    </nav>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-title">OCI 多账号管理面板</div>
+      <div class="top-actions">
+        <span class="pill pill-warn">明亮主题</span>
+        <form method="post" action="/logout" class="inline-form"><button class="btn primary" type="submit">退出登录</button></form>
+      </div>
+    </header>
+    <div class="wrap">
+      {% block content %}{% endblock %}
     </div>
-  </div>
-  {% block content %}{% endblock %}
-</div></body></html>
+  </main>
+</div>
+</body></html>

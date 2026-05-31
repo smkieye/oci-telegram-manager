@@ -206,6 +206,45 @@ def _instance_view(account: Account, item) -> dict[str, str]:
     }
 
 
+def _format_created_at(value: str | None) -> str:
+    if not value:
+        return "-"
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return value[:19]
+
+
+def _task_summary_for_account(account_id: str) -> tuple[str, int]:
+    related = [(key, task) for key, task in tasks.items() if task.account_id == account_id]
+    if not related:
+        return "idle", 0
+    _, task = sorted(related, key=lambda item: item[1].started_at, reverse=True)[0]
+    if task.running:
+        return "running", task.attempts
+    if task.success:
+        return "success", task.attempts
+    return "stopped", task.attempts
+
+
+def _dashboard_rows(accounts: list[Account]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for account in accounts:
+        valid, message = store.validate_account(account.id)
+        task_state, task_attempts = _task_summary_for_account(account.id)
+        rows.append(
+            {
+                "account": account,
+                "valid": valid,
+                "validation_message": message,
+                "task_state": task_state,
+                "task_attempts": task_attempts,
+                "created_at": _format_created_at(account.created_at),
+            }
+        )
+    return rows
+
+
 def _success_message(account: Account, instance, template: dict[str, Any], attempts: int, started_at: datetime) -> str:
     now = datetime.now()
     duration = _format_duration((now - started_at).total_seconds())
@@ -364,7 +403,16 @@ async def change_password(
 async def dashboard(request: Request, _: None = Depends(require_auth)):
     accounts = store.list_accounts()
     current = _current_account()
-    return templates.TemplateResponse("dashboard.html", {"request": request, "accounts": accounts, "current": current, "tasks": tasks})
+    rows = _dashboard_rows(accounts)
+    stats = {
+        "total": len(rows),
+        "valid": sum(1 for row in rows if row["valid"]),
+        "running_tasks": sum(1 for row in rows if row["task_state"] == "running"),
+    }
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {"request": request, "accounts": accounts, "rows": rows, "stats": stats, "current": current, "current_id": store.get_current_id(), "tasks": tasks},
+    )
 
 
 @app.get("/accounts", response_class=HTMLResponse)
@@ -376,6 +424,19 @@ async def accounts_page(request: Request, _: None = Depends(require_auth)):
 async def set_current(account_id: str = Form(...), _: None = Depends(require_auth)):
     store.set_current(account_id)
     return RedirectResponse("/accounts", status_code=303)
+
+
+@app.post("/accounts/delete")
+async def delete_account(account_id: str = Form(...), _: None = Depends(require_auth)):
+    store.delete_account(account_id)
+    return RedirectResponse("/accounts", status_code=303)
+
+
+@app.post("/accounts/batch-delete")
+async def batch_delete_accounts(account_ids: list[str] = Form(default=[]), _: None = Depends(require_auth)):
+    for account_id in account_ids:
+        store.delete_account(account_id)
+    return RedirectResponse("/", status_code=303)
 
 
 @app.post("/accounts/add")
@@ -459,27 +520,41 @@ async def sniper_save(
 
 
 @app.post("/sniper/start")
-async def sniper_start(background: BackgroundTasks, _: None = Depends(require_auth)):
-    account = _current_account()
+async def sniper_start(
+    background: BackgroundTasks,
+    account_id: str | None = Form(None),
+    redirect_to: str = Form("/sniper"),
+    _: None = Depends(require_auth),
+):
+    account = store.set_current(account_id) if account_id else _current_account()
     if account and not (tasks.get(account.id) and tasks[account.id].running):
         tasks[account.id] = WebSniperTask(account_id=account.id, started_at=datetime.now())
         background.add_task(_sniper_loop, account.id)
-    return RedirectResponse("/sniper", status_code=303)
+    return RedirectResponse(redirect_to if redirect_to.startswith("/") else "/sniper", status_code=303)
 
 
 @app.post("/sniper/stop")
-async def sniper_stop(_: None = Depends(require_auth)):
-    account = _current_account()
+async def sniper_stop(
+    account_id: str | None = Form(None),
+    redirect_to: str = Form("/sniper"),
+    _: None = Depends(require_auth),
+):
+    account = store.set_current(account_id) if account_id else _current_account()
     if account and account.id in tasks:
         tasks[account.id].stop_requested = True
-    return RedirectResponse("/sniper", status_code=303)
+    return RedirectResponse(redirect_to if redirect_to.startswith("/") else "/sniper", status_code=303)
 
 
 @app.post("/sniper/once")
-async def sniper_once(background: BackgroundTasks, _: None = Depends(require_auth)):
-    account = _current_account()
+async def sniper_once(
+    background: BackgroundTasks,
+    account_id: str | None = Form(None),
+    redirect_to: str = Form("/sniper"),
+    _: None = Depends(require_auth),
+):
+    account = store.set_current(account_id) if account_id else _current_account()
     if account:
         key = f"{account.id}:once:{time.time()}"
         tasks[key] = WebSniperTask(account_id=account.id, started_at=datetime.now())
         background.add_task(_sniper_once, key)
-    return RedirectResponse("/sniper", status_code=303)
+    return RedirectResponse(redirect_to if redirect_to.startswith("/") else "/sniper", status_code=303)
